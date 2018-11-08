@@ -19,10 +19,17 @@ echo "Okay time to download the raw data. \n We begin with IMDB"
 mkdir raw
 mkdir raw/imdb
 wget http://ai.stanford.edu/~amaas/data/sentiment/aclImdb_v1.tar.gz -P ./raw/imdb/
+tar -zxvf aclImdb_v1.tar.gz
 
 # Other data downloads come here @TODO
 
 # Download pretrained model
 echo "Finally, lets download the pretrained model and we're good to go."
 mkdir resources
-wget -nH -r -np -P ./resources/ http://files.fast.ai/models/wt103/
+wget -nH -r -np -P ./resources/ http://files.fast.aiclear/models/wt103/
+
+
+mkdir resources/proc
+mkdir resources/proc/imdb
+mkdir resources/proc/imdb/data
+mkdir resources/proc/imdb/model
