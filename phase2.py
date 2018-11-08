@@ -89,7 +89,7 @@ class LanguageModel(nn.Module):
         ).to(self.device)
         self.encoder.reset()
 
-    def _train(self, x, y, loss_fn):
+    def train(self, x, y, loss_fn):
         score = self.forward(x, y)
         loss = loss_fn(score, y)
         return loss, score
@@ -151,6 +151,9 @@ class LanguageModel(nn.Module):
         if self.debug: print("loading Bilstmdot model from", location)
         self.encoder.load_state_dict(torch.load(location)['encoder'])
         if self.debug: print("model loaded with weights ,", self.get_parameter_sum())
+
+    def save(self, path):
+        pass
 
 
 def eval(y_pred, y_true):
@@ -376,7 +379,7 @@ opt.param_groups[0]['lr'] = 1e-3 / 2
 lr_args = {'iterations': len(data_fn(data['train']))*1, 'cut_frac': 0.1, 'ratio': 32}
 lr_schedule = lriters.LearningRateScheduler(opt, lr_args, lriters.SlantedTriangularLR)
 
-args = {'epochs': 1, 'wd': 0, 'data': data,
+args = {'epochs': 1, 'weight_decay': 0, 'data': data,
         'device': device, 'opt': opt, 'loss_fn': loss_fn, 'train_fn': lm.train,
         'predict_fn': lm.predict, 'data_fn': data_fn, 'model': lm,
         'eval_fn': eval, 'epoch_start_hook': partial(loops.reset_hidden, lm),
@@ -402,6 +405,10 @@ traces_main = loops.generic_loop(**args)
 traces = [a+b for a, b in zip(traces_start, traces_main)]
 
 # Dumping the traces
-with open('traces.pkl', 'w+') as fl:
+with open('traces.pkl', 'wb+') as fl:
     pickle.dump(traces, fl)
+
+torch.save(lm.state_dict(), PATH / 'unsup_model.torch')
+
+
 
