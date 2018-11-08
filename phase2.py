@@ -170,6 +170,7 @@ DATA_PATH = Path('raw/imdb/aclImdb/')
 DATA_PATH.mkdir(exist_ok=True)
 PATH = Path('resources/proc/imdb')
 DATA_PROC_PATH = PATH / 'data'
+DATA_LM_PATH = PATH / 'datalm'
 
 LM_PATH = Path('resources/models')
 LM_PATH.mkdir(exist_ok=True)
@@ -219,8 +220,8 @@ if DEBUG:
 df_trn = pd.DataFrame({'text': trn_texts, 'labels': [0] * len(trn_texts)}, columns=col_names)
 df_val = pd.DataFrame({'text': val_texts, 'labels': [0] * len(val_texts)}, columns=col_names)
 
-# df_trn.to_csv(LM_PATH / 'train.csv', header=False, index=False)
-# df_val.to_csv(LM_PATH / 'test.csv', header=False, index=False)
+df_trn.to_csv(DATA_LM_PATH / 'train.csv', header=False, index=False)
+df_val.to_csv(DATA_LM_PATH / 'test.csv', header=False, index=False)
 
 
 """
@@ -273,18 +274,18 @@ def get_all(df, n_lbls):
     return tok, labels
 
 
-# df_trn = pd.read_csv(LM_PATH / 'train.csv', header=None, chunksize=chunksize)
-# df_val = pd.read_csv(LM_PATH / 'test.csv', header=None, chunksize=chunksize)
+df_trn = pd.read_csv(DATA_LM_PATH / 'train.csv', header=None, chunksize=chunksize)
+df_val = pd.read_csv(DATA_LM_PATH / 'test.csv', header=None, chunksize=chunksize)
 
 tok_trn, trn_labels = get_all(df_trn, 1)
 tok_val, val_labels = get_all(df_val, 1)
 
 # Save to disk
-(LM_PATH / 'tmp').mkdir(exist_ok=True)
-np.save(LM_PATH / 'tmp' / 'tok_trn.npy', tok_trn)
-np.save(LM_PATH / 'tmp' / 'tok_val.npy', tok_val)
-tok_trn = np.load(LM_PATH / 'tmp' / 'tok_trn.npy')
-tok_val = np.load(LM_PATH / 'tmp' / 'tok_val.npy')
+(DATA_LM_PATH / 'tmp').mkdir(exist_ok=True)
+np.save(DATA_LM_PATH / 'tmp' / 'tok_trn.npy', tok_trn)
+np.save(DATA_LM_PATH / 'tmp' / 'tok_val.npy', tok_val)
+tok_trn = np.load(DATA_LM_PATH / 'tmp' / 'tok_trn.npy')
+tok_val = np.load(DATA_LM_PATH / 'tmp' / 'tok_val.npy')
 
 freq = Counter(p for o in tok_trn for p in o)
 # freq.most_common(25)
@@ -300,12 +301,12 @@ len(itos)
 
 trn_lm = np.array([[stoi[o] for o in p] for p in tok_trn])
 val_lm = np.array([[stoi[o] for o in p] for p in tok_val])
-np.save(LM_PATH / 'tmp' / 'trn_ids.npy', trn_lm)
-np.save(LM_PATH / 'tmp' / 'val_ids.npy', val_lm)
-pickle.dump(itos, open(LM_PATH / 'tmp' / 'itos.pkl', 'wb'))
-trn_lm = np.load(LM_PATH / 'tmp' / 'trn_ids.npy')
-val_lm = np.load(LM_PATH / 'tmp' / 'val_ids.npy')
-itos = pickle.load(open(LM_PATH / 'tmp' / 'itos.pkl', 'rb'))
+np.save(DATA_LM_PATH / 'tmp' / 'trn_ids.npy', trn_lm)
+np.save(DATA_LM_PATH / 'tmp' / 'val_ids.npy', val_lm)
+pickle.dump(itos, open(DATA_LM_PATH / 'tmp' / 'itos.pkl', 'wb'))
+trn_lm = np.load(DATA_LM_PATH / 'tmp' / 'trn_ids.npy')
+val_lm = np.load(DATA_LM_PATH / 'tmp' / 'val_ids.npy')
+itos = pickle.load(open(DATA_LM_PATH / 'tmp' / 'itos.pkl', 'rb'))
 vs = len(itos)
 
 if DEBUG:
