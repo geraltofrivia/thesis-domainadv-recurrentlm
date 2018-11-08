@@ -13,6 +13,9 @@ from functools import partial
 from typing import AnyStr, Callable
 from sklearn.model_selection import train_test_split
 
+import os
+os.environ['QT_QPA_PLATFORM']='offscreen'
+
 # FastAI Imports
 from fastai import text, core, lm_rnn
 
@@ -23,7 +26,7 @@ import torch.tensor as T
 import torch.nn.functional as F
 
 # Mytorch imports
-import mytorch as mt
+from mytorch import loops, lriters
 from mytorch.utils.goodies import *
 
 device = torch.device('cuda')
@@ -260,7 +263,7 @@ def get_texts(df, n_lbls=1):
     for i in range(n_lbls + 1, len(df.columns)): texts += f' {FLD} {i-n_lbls} ' + df[i].astype(str)
     texts = list(texts.apply(fixup).values)
 
-    tok = text.Tokenizer().proc_all_mp(f.core.partition_by_cores(texts))
+    tok = text.Tokenizer().proc_all_mp(core.partition_by_cores(texts))
     return tok, list(labels)
 
 
@@ -371,14 +374,14 @@ opt.param_groups[0]['lr'] = 1e-3 / 2
 
 # lr_args = {'batches':, 'cycles': 1}
 lr_args = {'iterations': len(data_fn(data['train']))*1, 'cut_frac': 0.1, 'ratio': 32}
-lr_schedule = mt.lriters.LearningRateScheduler(opt, lr_args, mt.lriters.SlantedTriangularLR)
+lr_schedule = lriters.LearningRateScheduler(opt, lr_args, lriters.SlantedTriangularLR)
 
 args = {'epochs': 1, 'wd': 0, 'data': data,
         'device': device, 'opt': opt, 'loss_fn': loss_fn, 'train_fn': lm.train,
         'predict_fn': lm.predict, 'data_fn': data_fn, 'model': lm,
-        'eval_fn': eval, 'epoch_start_hook': partial(mt.loops.reset_hidden, lm),
+        'eval_fn': eval, 'epoch_start_hook': partial(loops.reset_hidden, lm),
         'clip_grads_at': -1.0, 'lr_schedule': lr_schedule}
-traces_start = mt.loops.generic_loop(**args)
+traces_start = loops.generic_loop(**args)
 
 # Now unfreeze all layers and apply discr
 for grp in opt.param_groups:
@@ -391,14 +394,14 @@ if DEBUG:
     print([x['lr'] for x in opt.param_groups])
 
 lr_args = {'iterations': len(data_fn(data['train']))*15, 'cut_frac': 0.1, 'ratio': 32}
-lr_schedule = mt.lriters.LearningRateScheduler(opt, lr_args, mt.lriters.SlantedTriangularLR)
+lr_schedule = lriters.LearningRateScheduler(opt, lr_args, lriters.SlantedTriangularLR)
 args['lr_schedule'] = lr_schedule
 args['epochs'] = 2
 
-traces_main = mt.loops.generic_loop(**args)
+traces_main = loops.generic_loop(**args)
 traces = [a+b for a, b in zip(traces_start, traces_main)]
 
 # Dumping the traces
-with open('traces.pkl', 'w+') as f:
-    pickle.dump(traces, f)
+with open('traces.pkl', 'w+') as fl:
+    pickle.dump(traces, fl)
 
