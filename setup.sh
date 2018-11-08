@@ -7,7 +7,7 @@ pip install -r ./mytorch/requirements.txt
 
 echo "Let's clone fastai, too (and use its old stuff)"
 git clone https://github.com/fastai/fastai.git -q
-pip install -r ./fastai/requirements.txt
+pip install -r ./fastai/old/requirements.txt
 mkdir tmp
 mv fastai/old/fastai/* tmp/
 rm -rf fastai/*
