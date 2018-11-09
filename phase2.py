@@ -78,7 +78,7 @@ class LanguageModel(nn.Module):
         """
             Explanation:
                 400*3 because input is [ h_T, maxpool, meanpool ]
-                0.4, 0.1 are drops at various layers
+                0.4, 0.1 are drops at various layersLM_PATH
         """
         self.linear = CustomLinear(
             _encargs['ntoken'],
@@ -303,7 +303,8 @@ itos.insert(0, '_pad_')
 itos.insert(0, '_unk_')
 
 stoi = collections.defaultdict(lambda: 0, {v: k for k, v in enumerate(itos)})
-len(itos)
+if DEBUG:
+    print(len(itos))
 
 trn_lm = np.array([[stoi[o] for o in p] for p in tok_trn])
 val_lm = np.array([[stoi[o] for o in p] for p in tok_val])

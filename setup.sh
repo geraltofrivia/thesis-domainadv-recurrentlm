@@ -3,7 +3,11 @@ echo "Shall get you up and running in no time"
 
 echo "Lets first clone mytorch. We'll be using it rather unsparingly."
 git clone https://github.com/geraltofrivia/mytorch.git -q
-pip install -r ./mytorch/requirements.txt
+cd mytorch
+chmod +x setup.sh
+./setup.sh
+cd ..
+
 
 echo "Let's clone fastai, too (and use its old stuff)"
 git clone https://github.com/fastai/fastai.git -q
