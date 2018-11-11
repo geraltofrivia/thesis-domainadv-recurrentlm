@@ -400,7 +400,7 @@ if DEBUG:
 lr_args = {'iterations': len(data_fn(data['train']))*15, 'cut_frac': 0.1, 'ratio': 32}
 lr_schedule = lriters.LearningRateScheduler(opt, lr_args, lriters.SlantedTriangularLR)
 args['lr_schedule'] = lr_schedule
-args['epochs'] = 2
+args['epochs'] = 1
 
 traces_main = loops.generic_loop(**args)
 traces = [a+b for a, b in zip(traces_start, traces_main)]
@@ -410,6 +410,7 @@ with open('traces.pkl', 'wb+') as fl:
     pickle.dump(traces, fl)
 
 torch.save(lm.state_dict(), PATH / 'unsup_model.torch')
+torch.save(lm.encoder.state_dict(), PATH / 'unsup_model_enc.torch')
 
 
 

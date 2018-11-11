@@ -18,7 +18,6 @@ from typing import AnyStr, Callable
 from sklearn.model_selection import train_test_split
 
 import os
-
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 
 # FastAI Imports
@@ -34,8 +33,6 @@ import torch.nn.functional as F
 # Mytorch imports
 from mytorch import loops, lriters as mtlr, dataiters as mtdi
 from mytorch.utils.goodies import *
-
-import phase2
 
 device = torch.device('cuda')
 np.random.seed(42)
@@ -190,6 +187,35 @@ class TextClassifier(nn.Module):
 '''
     Prepare data
 '''
+re1 = re.compile(r'  +')
+
+def fixup(x):
+    x = x.replace('#39;', "'").replace('amp;', '&').replace('#146;', "'").replace(
+        'nbsp;', ' ').replace('#36;', '$').replace('\\n', "\n").replace('quot;', "'").replace(
+        '<br />', "\n").replace('\\"', '"').replace('<unk>', 'u_n').replace(' @.@ ', '.').replace(
+        ' @-@ ', '-').replace('\\', ' \\ ')
+    return re1.sub(' ', html.unescape(x))
+
+
+def get_texts(df, n_lbls=1):
+    labels = df.iloc[:, range(n_lbls)].values.astype(np.int64)
+    texts = f'\n{BOS} {FLD} 1 ' + df[n_lbls].astype(str)
+    for i in range(n_lbls + 1, len(df.columns)): texts += f' {FLD} {i-n_lbls} ' + df[i].astype(str)
+    texts = list(texts.apply(fixup).values)
+
+    tok = text.Tokenizer().proc_all_mp(core.partition_by_cores(texts))
+    return tok, list(labels)
+
+def get_all(df, n_lbls):
+    tok, labels = [], []
+    for i, r in enumerate(df):
+        print(i)
+        tok_, labels_ = get_texts(r, n_lbls)
+        tok += tok_;
+        labels += labels_
+    return tok, labels
+
+
 itos2 = pickle.load((DATA_LM_PATH / 'tmp' / 'itos.pkl').open('rb'))
 stoi2 = collections.defaultdict(lambda: -1, {v: k for k, v in enumerate(itos2)})
 
@@ -197,8 +223,8 @@ chunksize = 24000
 df_trn = pd.read_csv(DATA_LM_PATH / 'train.csv', header=None, chunksize=chunksize)
 df_val = pd.read_csv(DATA_LM_PATH / 'test.csv', header=None, chunksize=chunksize)
 
-_, trn_labels = phase2.get_all(df_trn, 1)
-_, val_labels = phase2.get_all(df_val, 1)
+_, trn_labels = get_all(df_trn, 1)
+_, val_labels = get_all(df_val, 1)
 
 # trn_labels = np.squeeze(np.load(CLAS_PATH / 'tmp' / 'trn_labels.npy'))
 # val_labels = np.squeeze(np.load(CLAS_PATH / 'tmp' / 'val_labels.npy'))
@@ -213,7 +239,8 @@ print("OH SHIT CHECK IF DATA MAKES SENSE ACROSS trn_labels and trn_clas!")
     Make model
 '''
 dps = list(np.asarray([0.4, 0.5, 0.05, 0.3, 0.4]) * 0.5)
-enc_wgts = torch.load(LM_PATH, map_location=lambda storage, loc: storage)
+# enc_wgts = torch.load(LM_PATH, map_location=lambda storage, loc: storage)
+enc_wgts = torch.load(PATH/'unsup_model_enc.torch', map_location=lambda storage, loc: storage)
 clf = TextClassifier(device, len(itos2), dps, enc_wgts)
 
 '''
@@ -235,6 +262,7 @@ lr_schedule = mtlr.LearningRateScheduler(opt, lr_args, mtlr.CosineAnnealingLR)
 
 def epoch_end_hook()-> None:
     lr_schedule.reset()
+
 
 args = {'epochs': 1, 'data': data, 'device': device,
         'opt': opt, 'loss_fn': loss_fn, 'model': clf,
