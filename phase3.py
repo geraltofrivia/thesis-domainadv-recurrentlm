@@ -2,33 +2,25 @@
     Pulls an unsupervised fine tuned model from disk, also data, and goes to town on it.
 """
 
+import collections
+import html
+import os
+import pickle
 # External Lib imports
 import re
-import html
-import pickle
-import sklearn
-import collections
-import numpy as np
-import pandas as pd
-from tqdm import tqdm
-from pathlib import Path
-from pprint import pprint
 from functools import partial
-from typing import AnyStr, Callable
-from sklearn.model_selection import train_test_split
+from pathlib import Path
 
-import os
+import pandas as pd
+
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 
 # FastAI Imports
 from fastai import text, core, lm_rnn
 
 # Torch imports
-import torch
 import torch.nn as nn
-import torch.tensor as T
 import torch.optim as optim
-import torch.nn.functional as F
 
 # Mytorch imports
 from mytorch import loops, lriters as mtlr, dataiters as mtdi
@@ -220,20 +212,15 @@ itos2 = pickle.load((DATA_LM_PATH / 'tmp' / 'itos.pkl').open('rb'))
 stoi2 = collections.defaultdict(lambda: -1, {v: k for k, v in enumerate(itos2)})
 
 chunksize = 24000
-df_trn = pd.read_csv(DATA_LM_PATH / 'train.csv', header=None, chunksize=chunksize)
-df_val = pd.read_csv(DATA_LM_PATH / 'test.csv', header=None, chunksize=chunksize)
+df_trn = pd.read_csv(DATA_PROC_PATH / 'train.csv', header=None, chunksize=chunksize)
+df_val = pd.read_csv(DATA_PROC_PATH / 'test.csv', header=None, chunksize=chunksize)
 
-_, trn_labels = get_all(df_trn, 1)
-_, val_labels = get_all(df_val, 1)
+trn_clas, trn_labels = get_all(df_trn, 1)
+val_clas, val_labels = get_all(df_val, 1)
 
-# trn_labels = np.squeeze(np.load(CLAS_PATH / 'tmp' / 'trn_labels.npy'))
-# val_labels = np.squeeze(np.load(CLAS_PATH / 'tmp' / 'val_labels.npy'))
+trn_clas = np.array([[stoi2[w] for w in para] for para in trn_clas])
+val_clas = np.array([[stoi2[w] for w in para] for para in val_clas])
 
-trn_clas = np.load(DATA_LM_PATH / 'tmp' / 'trn_ids.npy')
-val_clas = np.load(DATA_LM_PATH / 'tmp' / 'val_ids.npy')
-
-# @TODO: see below
-print("OH SHIT CHECK IF DATA MAKES SENSE ACROSS trn_labels and trn_clas!")
 
 '''
     Make model
@@ -262,6 +249,15 @@ lr_schedule = mtlr.LearningRateScheduler(opt, lr_args, mtlr.CosineAnnealingLR)
 
 def epoch_end_hook()-> None:
     lr_schedule.reset()
+
+def eval(y_pred, y_true):
+    """
+        Expects a batch of input
+
+        :param y_pred: tensor of shape (b, nc)
+        :param y_true: tensor of shape (b, 1)
+    """
+    return torch.mean((torch.argmax(y_pred, dim=1) == y_true).float())
 
 
 args = {'epochs': 1, 'data': data, 'device': device,
