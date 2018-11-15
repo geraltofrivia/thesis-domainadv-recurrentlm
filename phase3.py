@@ -2,7 +2,6 @@
     Pulls an unsupervised fine tuned model from disk, also data, and goes to town on it.
 """
 
-import collections
 import html
 import os
 import pickle
@@ -133,7 +132,7 @@ class TextClassifier(nn.Module):
         # inputs are S*B
 
         # Encoding all the data
-        op_p = self.encoder(x)
+        op_p = self.encoder(x.transpose(1, 0))
         # pos_batch = op_p[1][-1][-1]
         score = self.linear(op_p)[0]
 
@@ -153,7 +152,7 @@ class TextClassifier(nn.Module):
         """
         with torch.no_grad():
             self._eval()
-            op_p = self.encoder(ques)
+            op_p = self.encoder(ques.transpose(1, 0))
 
             predicted = self.linear(op_p)[0]
             self._train()
@@ -181,6 +180,7 @@ class TextClassifier(nn.Module):
 '''
 re1 = re.compile(r'  +')
 
+
 def fixup(x):
     x = x.replace('#39;', "'").replace('amp;', '&').replace('#146;', "'").replace(
         'nbsp;', ' ').replace('#36;', '$').replace('\\n', "\n").replace('quot;', "'").replace(
@@ -198,18 +198,20 @@ def get_texts(df, n_lbls=1):
     tok = text.Tokenizer().proc_all_mp(core.partition_by_cores(texts))
     return tok, list(labels)
 
+
 def get_all(df, n_lbls):
     tok, labels = [], []
     for i, r in enumerate(df):
         print(i)
         tok_, labels_ = get_texts(r, n_lbls)
-        tok += tok_;
+        tok += tok_
         labels += labels_
     return tok, labels
 
 
 itos2 = pickle.load((DATA_LM_PATH / 'tmp' / 'itos.pkl').open('rb'))
-stoi2 = collections.defaultdict(lambda: -1, {v: k for k, v in enumerate(itos2)})
+# stoi2 = collections.defaultdict(lambda: 0, {v: k for k, v in enumerate(itos2)})
+stoi2 = {v: k for k, v in enumerate(itos2)}
 
 chunksize = 24000
 df_trn = pd.read_csv(DATA_PROC_PATH / 'train.csv', header=None, chunksize=chunksize)
@@ -218,16 +220,17 @@ df_val = pd.read_csv(DATA_PROC_PATH / 'test.csv', header=None, chunksize=chunksi
 trn_clas, trn_labels = get_all(df_trn, 1)
 val_clas, val_labels = get_all(df_val, 1)
 
-trn_clas = np.array([[stoi2[w] for w in para] for para in trn_clas])
-val_clas = np.array([[stoi2[w] for w in para] for para in val_clas])
-
+trn_clas = np.array([[stoi2.get(w, 0) for w in para] for para in trn_clas])
+val_clas = np.array([[stoi2.get(w, 0) for w in para] for para in val_clas])
+trn_labels = [x for y in trn_labels for x in y]
+val_labels = [x for y in val_labels for x in y]
 
 '''
     Make model
 '''
 dps = list(np.asarray([0.4, 0.5, 0.05, 0.3, 0.4]) * 0.5)
 # enc_wgts = torch.load(LM_PATH, map_location=lambda storage, loc: storage)
-enc_wgts = torch.load(PATH/'unsup_model_enc.torch', map_location=lambda storage, loc: storage)
+enc_wgts = torch.load(PATH / 'unsup_model_enc.torch', map_location=lambda storage, loc: storage)
 clf = TextClassifier(device, len(itos2), dps, enc_wgts)
 
 '''
@@ -240,15 +243,17 @@ opt = make_opt(clf, opt_fn, lr=0.0)
 opt.param_groups[-1]['lr'] = 0.01
 
 # Make data
-data_fn = partial(mtdi.SortishSampler, _batchsize=bs)
+data_fn = partial(mtdi.SortishSampler, _batchsize=bs, _padidx=1)
 data = {'train': {'x': trn_clas, 'y': trn_labels}, 'valid': {'x': val_clas, 'y': val_labels}}
 
 # Make lr scheduler
 lr_args = {'iterations': len(data_fn(data['train'])), 'cycles': 1}
 lr_schedule = mtlr.LearningRateScheduler(opt, lr_args, mtlr.CosineAnnealingLR)
 
-def epoch_end_hook()-> None:
+
+def epoch_end_hook() -> None:
     lr_schedule.reset()
+
 
 def eval(y_pred, y_true):
     """
@@ -302,6 +307,3 @@ args['epochs'] = 15
 lr_schedule = mtlr.LearningRateScheduler(opt, lr_args, mtlr.CosineAnnealingLR)
 args['lr_schedule'] = lr_schedule
 loops.generic_loop(**args)
-
-
-
