@@ -1,26 +1,21 @@
 # External Lib imports
-import re
-import html
-import pickle
-import sklearn
 import collections
-import numpy as np
-import pandas as pd
-from tqdm import tqdm
-from pathlib import Path
-from pprint import pprint
-from functools import partial
-from typing import AnyStr, Callable
-from sklearn.model_selection import train_test_split
-
+import html
 import os
+import pickle
+import re
+from functools import partial
+from pathlib import Path
+
+import pandas as pd
+import sklearn
+
 os.environ['QT_QPA_PLATFORM']='offscreen'
 
 # FastAI Imports
 from fastai import text, core, lm_rnn
 
 # Torch imports
-import torch
 import torch.nn as nn
 import torch.tensor as T
 import torch.nn.functional as F
@@ -89,12 +84,7 @@ class LanguageModel(nn.Module):
         ).to(self.device)
         self.encoder.reset()
 
-    def train(self, x, y, loss_fn):
-        score = self.forward(x, y)
-        loss = loss_fn(score, y)
-        return loss, score
-
-    def forward(self, x, y):
+    def forward(self, x):
         # Encoding all the data
         op_p = self.encoder(x)
 
@@ -116,44 +106,15 @@ class LanguageModel(nn.Module):
         layers.reverse()
         return torch.nn.ModuleList(layers)
 
-    def _eval(self):
-        self.encoder.eval()
-        self.linear.eval()
-
-    def _train(self):
-        self.encoder.train()
-        self.linear.train()
-
-    def predict(self, ques):
+    def predict(self, x):
         """
             Same code works for both pairwise or pointwise
         """
         with torch.no_grad():
-            self._eval()
-            op_p = self.encoder(ques)
-
-            predicted = self.linear(op_p)[0]
-            self._train()
-            return predicted
-
-    def prepare_save(self):
-        """
-
-            This function is called when someone wants to save the underlying models.
-            Returns a tuple of key:model pairs which is to be interpreted within save model.
-
-        :return: [(key, model)]
-        """
-        return [('encoder', self.encoder)]
-
-    def load_from(self, location):
-        # Pull the data from disk
-        if self.debug: print("loading Bilstmdot model from", location)
-        self.encoder.load_state_dict(torch.load(location)['encoder'])
-        if self.debug: print("model loaded with weights ,", self.get_parameter_sum())
-
-    def save(self, path):
-        pass
+            self.eval()
+            pred = self.forward(x)
+            self.train()
+            return pred
 
 
 def eval(y_pred, y_true):

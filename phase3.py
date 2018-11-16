@@ -76,7 +76,7 @@ class TextClassifier(nn.Module):
         for params in layer.parameters():
             params.requires_grad = True
 
-    # @TODO: dont take param from param dict, but manually. Also inject comments.
+    # @TODO: inject comments.
     def __init__(self, _device: torch.device, ntoken: int, dps: list, enc_wgts, _debug=False):
         super(TextClassifier, self).__init__()
 
@@ -101,11 +101,6 @@ class TextClassifier(nn.Module):
         self.linear = text.PoolingLinearClassifier(layers=[400 * 3, 50, 2], drops=[dps[4], 0.1]).to(self.device)
         self.encoder.reset()
 
-    def train(self, x, y, loss_fn):
-        score = self.forward(x, y)
-        loss = loss_fn(score, y)
-        return loss, score
-
     @property
     def layers(self):
         layers = [x for x in self.encoder.layers]
@@ -119,16 +114,7 @@ class TextClassifier(nn.Module):
         layers.reverse()
         return torch.nn.ModuleList(layers)
 
-    def forward(self, x, y):
-        '''
-            Given data, passes it through model, inited in constructor, returns loss and updates the weight
-            :params data: {batch of question, paths and y labels}
-            :params models list of [models]
-            :params optimizer: torch.optim object
-            :params loss fn: torch.nn loss object
-            :params device: torch.device object
-            returrns loss
-        '''
+    def forward(self, x):
         # inputs are S*B
 
         # Encoding all the data
@@ -138,41 +124,15 @@ class TextClassifier(nn.Module):
 
         return score
 
-    def _eval(self):
-        self.encoder.eval()
-        self.linear.eval()
-
-    def _train(self):
-        self.encoder.train()
-        self.linear.train()
-
-    def predict(self, ques):
+    def predict(self, x):
         """
             Same code works for both pairwise or pointwise
         """
         with torch.no_grad():
-            self._eval()
-            op_p = self.encoder(ques.transpose(1, 0))
-
-            predicted = self.linear(op_p)[0]
-            self._train()
+            self.eval()
+            predicted = self.forward(x)
+            self.train()
             return predicted
-
-    def prepare_save(self):
-        """
-
-            This function is called when someone wants to save the underlying models.
-            Returns a tuple of key:model pairs which is to be interpreted within save model.
-
-        :return: [(key, model)]
-        """
-        return [('encoder', self.encoder)]
-
-    def load_from(self, location):
-        # Pull the data from disk
-        if self.debug: print("loading Bilstmdot model from", location)
-        self.encoder.load_state_dict(torch.load(location)['encoder'])
-        if self.debug: print("model loaded with weights ,", self.get_parameter_sum())
 
 
 '''
