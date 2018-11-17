@@ -25,7 +25,10 @@ mkdir raw/imdb
 wget http://ai.stanford.edu/~amaas/data/sentiment/aclImdb_v1.tar.gz -P ./raw/imdb/
 tar -zxvf ./raw/imdb/aclImdb_v1.tar.gz -C ./raw/imdb/
 
-# Other data downloads come here @TODO
+# Download Wikitext103
+mkdir raw/wikitext
+wget https://s3.amazonaws.com/research.metamind.io/wikitext/wikitext-103-v1.zip ./raw/wikitext/
+unzip ./raw/wikitext/wikitext-103-v1.zip -d ./raw/wikitext/
 
 # Download pretrained model
 echo "Finally, lets download the pretrained model and we're good to go."

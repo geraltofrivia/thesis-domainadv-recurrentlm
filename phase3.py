@@ -66,16 +66,6 @@ class CustomEncoder(lm_rnn.MultiBatchRNN):
 
 class TextClassifier(nn.Module):
 
-    @staticmethod
-    def freeze_layer(layer):
-        for params in layer.parameters():
-            params.requires_grad = False
-
-    @staticmethod
-    def unfreeze_layer(layer):
-        for params in layer.parameters():
-            params.requires_grad = True
-
     # @TODO: inject comments.
     def __init__(self, _device: torch.device, ntoken: int, dps: list, enc_wgts, _debug=False):
         super(TextClassifier, self).__init__()
@@ -125,9 +115,6 @@ class TextClassifier(nn.Module):
         return score
 
     def predict(self, x):
-        """
-            Same code works for both pairwise or pointwise
-        """
         with torch.no_grad():
             self.eval()
             predicted = self.forward(x)
@@ -227,7 +214,7 @@ def eval(y_pred, y_true):
 
 args = {'epochs': 1, 'data': data, 'device': device,
         'opt': opt, 'loss_fn': loss_fn, 'model': clf,
-        'train_fn': clf.train, 'predict_fn': clf.predict,
+        'train_fn': clf, 'predict_fn': clf.predict,
         'epoch_end_hook': epoch_end_hook, 'weight_decay': 1e-7,
         'clip_grads_at': 0.30, 'lr_schedule': lr_schedule,
         'data_fn': data_fn, 'eval_fn': eval}
@@ -267,3 +254,6 @@ args['epochs'] = 15
 lr_schedule = mtlr.LearningRateScheduler(opt, lr_args, mtlr.CosineAnnealingLR)
 args['lr_schedule'] = lr_schedule
 loops.generic_loop(**args)
+
+
+torch.save(clf.state_dict(), PATH / 'sup_model.torch')

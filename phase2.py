@@ -47,16 +47,6 @@ class CustomLinear(text.LinearDecoder):
 
 class LanguageModel(nn.Module):
 
-    @staticmethod
-    def freeze_layer(layer):
-        for params in layer.parameters():
-            params.requires_grad = False
-
-    @staticmethod
-    def unfreeze_layer(layer):
-        for params in layer.parameters():
-            params.requires_grad = True
-
     def __init__(self,
                  _parameter_dict,
                  _device,
@@ -107,9 +97,6 @@ class LanguageModel(nn.Module):
         return torch.nn.ModuleList(layers)
 
     def predict(self, x):
-        """
-            Same code works for both pairwise or pointwise
-        """
         with torch.no_grad():
             self.eval()
             pred = self.forward(x)
@@ -146,7 +133,7 @@ PRE_LM_PATH = PRE_PATH / 'fwd_wt103.h5'
 CLASSES = ['neg', 'pos', 'unsup']
 
 
-def get_texts(path):
+def get_texts_org(path):
     texts, labels = [], []
     for idx, label in enumerate(CLASSES):
         for fname in (path / label).glob('*.*'):
@@ -155,65 +142,7 @@ def get_texts(path):
     return np.array(texts), np.array(labels)
 
 
-trn_texts, trn_labels = get_texts(DATA_PATH / 'train')
-val_texts, val_labels = get_texts(DATA_PATH / 'test')
-col_names = ['labels', 'text']
-
-if DEBUG:
-    print(len(trn_texts), len(val_texts))
-
-# Shuffle data
-np.random.seed(42)
-trn_idx = np.random.permutation(len(trn_texts))
-val_idx = np.random.permutation(len(val_texts))
-
-trn_texts, trn_labels = trn_texts[trn_idx], trn_labels[trn_idx]
-val_texts, val_labels = val_texts[val_idx], val_labels[val_idx]
-
-df_trn = pd.DataFrame({'text': trn_texts, 'labels': trn_labels}, columns=col_names)
-df_val = pd.DataFrame({'text': val_texts, 'labels': val_labels}, columns=col_names)
-
-df_trn[df_trn['labels'] != 2].to_csv(DATA_PROC_PATH / 'train.csv', header=False, index=False)
-df_val.to_csv(DATA_PROC_PATH / 'test.csv', header=False, index=False)
-
-(DATA_PROC_PATH / 'classes.txt').open('w', encoding='utf-8').writelines(f'{o}\n' for o in CLASSES)
-
-trn_texts, val_texts = sklearn.model_selection.train_test_split(
-    np.concatenate([trn_texts, val_texts]), test_size=0.1)
-
-if DEBUG:
-    print(len(trn_texts), len(val_texts))
-
-df_trn = pd.DataFrame({'text': trn_texts, 'labels': [0] * len(trn_texts)}, columns=col_names)
-df_val = pd.DataFrame({'text': val_texts, 'labels': [0] * len(val_texts)}, columns=col_names)
-
-df_trn.to_csv(DATA_LM_PATH / 'train.csv', header=False, index=False)
-df_val.to_csv(DATA_LM_PATH / 'test.csv', header=False, index=False)
-
-
-"""
-    ## Language model tokens
-    
-    In this section, we start cleaning up the messy text. There are 2 main activities we need to perform:
-
-    1. Clean up extra spaces, tab chars, new ln chars and other characters and replace them with standard ones
-    2. Use the awesome [spacy](http://spacy.io) library to tokenize the data. 
-    Since spacy does not provide a parallel/multicore version of the tokenizer, 
-        the fastai library adds this functionality. 
-    This parallel version uses all the cores of your CPUs 
-        and runs much faster than the serial version of the spacy tokenizer.
-    
-    Tokenization is the process of splitting the text into separate tokens 
-        so that each token can be assigned a unique index. 
-    This means we can convert the text into integer indexes our models can use.
-    
-    We use an appropriate chunksize as the tokenization process is memory intensive
-"""
-chunksize = 24000
-re1 = re.compile(r'  +')
-
-
-def fixup(x):
+def _fixup_(x):
     x = x.replace('#39;', "'").replace('amp;', '&').replace('#146;', "'").replace(
         'nbsp;', ' ').replace('#36;', '$').replace('\\n', "\n").replace('quot;', "'").replace(
         '<br />', "\n").replace('\\"', '"').replace('<unk>', 'u_n').replace(' @.@ ', '.').replace(
@@ -221,11 +150,11 @@ def fixup(x):
     return re1.sub(' ', html.unescape(x))
 
 
-def get_texts(df, n_lbls=1):
+def _get_texts_(df, n_lbls=1):
     labels = df.iloc[:, range(n_lbls)].values.astype(np.int64)
     texts = f'\n{BOS} {FLD} 1 ' + df[n_lbls].astype(str)
     for i in range(n_lbls + 1, len(df.columns)): texts += f' {FLD} {i-n_lbls} ' + df[i].astype(str)
-    texts = list(texts.apply(fixup).values)
+    texts = list(texts.apply(_fixup_).values)
 
     tok = text.Tokenizer().proc_all_mp(core.partition_by_cores(texts))
     return tok, list(labels)
@@ -235,143 +164,202 @@ def get_all(df, n_lbls):
     tok, labels = [], []
     for i, r in enumerate(df):
         print(i)
-        tok_, labels_ = get_texts(r, n_lbls)
+        tok_, labels_ = _get_texts_(r, n_lbls)
         tok += tok_;
         labels += labels_
     return tok, labels
 
 
-df_trn = pd.read_csv(DATA_LM_PATH / 'train.csv', header=None, chunksize=chunksize)
-df_val = pd.read_csv(DATA_LM_PATH / 'test.csv', header=None, chunksize=chunksize)
+if __name__ == "__main__":
 
-tok_trn, trn_labels = get_all(df_trn, 1)
-tok_val, val_labels = get_all(df_val, 1)
+    trn_texts, trn_labels = get_texts_org(DATA_PATH / 'train')
+    val_texts, val_labels = get_texts_org(DATA_PATH / 'test')
+    col_names = ['labels', 'text']
 
-# Save to disk
-(DATA_LM_PATH / 'tmp').mkdir(exist_ok=True)
-np.save(DATA_LM_PATH / 'tmp' / 'tok_trn.npy', tok_trn)
-np.save(DATA_LM_PATH / 'tmp' / 'tok_val.npy', tok_val)
-tok_trn = np.load(DATA_LM_PATH / 'tmp' / 'tok_trn.npy')
-tok_val = np.load(DATA_LM_PATH / 'tmp' / 'tok_val.npy')
+    if DEBUG:
+        print(len(trn_texts), len(val_texts))
 
-freq = Counter(p for o in tok_trn for p in o)
-# freq.most_common(25)
-max_vocab = 60000
-min_freq = 2
+    # Shuffle data
+    np.random.seed(42)
+    trn_idx = np.random.permutation(len(trn_texts))
+    val_idx = np.random.permutation(len(val_texts))
 
-itos = [o for o, c in freq.most_common(max_vocab) if c > min_freq]
-itos.insert(0, '_pad_')
-itos.insert(0, '_unk_')
+    trn_texts, trn_labels = trn_texts[trn_idx], trn_labels[trn_idx]
+    val_texts, val_labels = val_texts[val_idx], val_labels[val_idx]
 
-stoi = collections.defaultdict(lambda: 0, {v: k for k, v in enumerate(itos)})
-if DEBUG:
-    print(len(itos))
+    df_trn = pd.DataFrame({'text': trn_texts, 'labels': trn_labels}, columns=col_names)
+    df_val = pd.DataFrame({'text': val_texts, 'labels': val_labels}, columns=col_names)
 
-trn_lm = np.array([[stoi[o] for o in p] for p in tok_trn])
-val_lm = np.array([[stoi[o] for o in p] for p in tok_val])
-np.save(DATA_LM_PATH / 'tmp' / 'trn_ids.npy', trn_lm)
-np.save(DATA_LM_PATH / 'tmp' / 'val_ids.npy', val_lm)
-pickle.dump(itos, open(DATA_LM_PATH / 'tmp' / 'itos.pkl', 'wb'))
-trn_lm = np.load(DATA_LM_PATH / 'tmp' / 'trn_ids.npy')
-val_lm = np.load(DATA_LM_PATH / 'tmp' / 'val_ids.npy')
-itos = pickle.load(open(DATA_LM_PATH / 'tmp' / 'itos.pkl', 'rb'))
-vs = len(itos)
+    df_trn[df_trn['labels'] != 2].to_csv(DATA_PROC_PATH / 'train.csv', header=False, index=False)
+    df_val.to_csv(DATA_PROC_PATH / 'test.csv', header=False, index=False)
 
-if DEBUG:
-    print(vs, len(trn_lm))
+    (DATA_PROC_PATH / 'classes.txt').open('w', encoding='utf-8').writelines(f'{o}\n' for o in CLASSES)
 
-"""
-    Now we pull pretrained models from disk
-"""
-em_sz, nh, nl = 400, 1150, 3
-# PRE_PATH = PATH / 'models' / 'wt103'
-# PRE_LM_PATH = PRE_PATH / 'fwd_wt103.h5'
-wgts = torch.load(PRE_LM_PATH, map_location=lambda storage, loc: storage)
-enc_wgts = core.to_np(wgts['0.encoder.weight'])
-row_m = enc_wgts.mean(0)
-itos2 = pickle.load((PRE_PATH / 'itos_wt103.pkl').open('rb'))
-stoi2 = collections.defaultdict(lambda: -1, {v: k for k, v in enumerate(itos2)})
-new_w = np.zeros((vs, em_sz), dtype=np.float32)
-for i, w in enumerate(itos):
-    r = stoi2[w]
-    new_w[i] = enc_wgts[r] if r >= 0 else row_m
+    trn_texts, val_texts = sklearn.model_selection.train_test_split(
+        np.concatenate([trn_texts, val_texts]), test_size=0.1)
 
-wgts['0.encoder.weight'] = T(new_w)
-wgts['0.encoder_with_dropout.embed.weight'] = T(np.copy(new_w))
-wgts['1.decoder.weight'] = T(np.copy(new_w))
-wgts_enc = {'.'.join(k.split('.')[1:]): val
-            for k, val in wgts.items() if k[0] == '0'}
-wgts_dec = {'.'.join(k.split('.')[1:]): val
-            for k, val in wgts.items() if k[0] == '1'}
+    if DEBUG:
+        print(len(trn_texts), len(val_texts))
 
-wd = 1e-7
-bptt = 70
-bs = 24
-opt_fn = partial(torch.optim.Adam, betas=(0.8, 0.99))  # @TODO: find real optimizer, and params
+    df_trn = pd.DataFrame({'text': trn_texts, 'labels': [0] * len(trn_texts)}, columns=col_names)
+    df_val = pd.DataFrame({'text': val_texts, 'labels': [0] * len(val_texts)}, columns=col_names)
 
-# Load the pre-trained model
-parameter_dict = {'itos2': itos2}
-dps = list(np.asarray([0.25, 0.1, 0.2, 0.02, 0.15]) * 0.7)
-encargs = {'ntoken': new_w.shape[0],
-           'emb_sz': 400, 'n_hid': 1150,
-           'n_layers': 3, 'pad_token': 0,
-           'qrnn': False, 'dropouti': dps[0],
-           'wdrop': dps[2], 'dropoute': dps[3], 'dropouth': dps[4]}
+    df_trn.to_csv(DATA_LM_PATH / 'train.csv', header=False, index=False)
+    df_val.to_csv(DATA_LM_PATH / 'test.csv', header=False, index=False)
 
-# For now, lets assume our best lr = 0.001
-bestlr = 0.001 * 10
-lm = LanguageModel(parameter_dict, device, wgts_enc, wgts_dec, encargs)
-opt = make_opt(lm, opt_fn, lr=bestlr)
 
-data_fn = partial(text.LanguageModelLoader, bs=bs, bptt=bptt)
-data = {'train': np.concatenate(trn_lm), 'valid': np.concatenate(val_lm)}
-loss_fn = F.cross_entropy
-
-'''
-    Schedule
+    """
+        ## Language model tokens
+        
+        In this section, we start cleaning up the messy text. There are 2 main activities we need to perform:
     
-    -> Freeze all but last layer, run for 1 epoch
-    -> Unfreeze all of it, and apply discriminative fine-tuning, train normally.
-'''
-for grp in opt.param_groups:
-    grp['lr'] = 0.0
-opt.param_groups[0]['lr'] = 1e-3 / 2
+        1. Clean up extra spaces, tab chars, new ln chars and other characters and replace them with standard ones
+        2. Use the awesome [spacy](http://spacy.io) library to tokenize the data. 
+        Since spacy does not provide a parallel/multicore version of the tokenizer, 
+            the fastai library adds this functionality. 
+        This parallel version uses all the cores of your CPUs 
+            and runs much faster than the serial version of the spacy tokenizer.
+        
+        Tokenization is the process of splitting the text into separate tokens 
+            so that each token can be assigned a unique index. 
+        This means we can convert the text into integer indexes our models can use.
+        
+        We use an appropriate chunksize as the tokenization process is memory intensive
+    """
+    chunksize = 24000
+    re1 = re.compile(r'  +')
 
-# lr_args = {'batches':, 'cycles': 1}
-lr_args = {'iterations': len(data_fn(data['train']))*1, 'cut_frac': 0.1, 'ratio': 32}
-lr_schedule = lriters.LearningRateScheduler(opt, lr_args, lriters.SlantedTriangularLR)
+    df_trn = pd.read_csv(DATA_LM_PATH / 'train.csv', header=None, chunksize=chunksize)
+    df_val = pd.read_csv(DATA_LM_PATH / 'test.csv', header=None, chunksize=chunksize)
 
-args = {'epochs': 1, 'weight_decay': 0, 'data': data,
-        'device': device, 'opt': opt, 'loss_fn': loss_fn, 'train_fn': lm.train,
-        'predict_fn': lm.predict, 'data_fn': data_fn, 'model': lm,
-        'eval_fn': eval, 'epoch_start_hook': partial(loops.reset_hidden, lm),
-        'clip_grads_at': -1.0, 'lr_schedule': lr_schedule}
-traces_start = loops.generic_loop(**args)
+    tok_trn, trn_labels = get_all(df_trn, 1)
+    tok_val, val_labels = get_all(df_val, 1)
 
-# Now unfreeze all layers and apply discr
-for grp in opt.param_groups:
-    grp['lr'] = bestlr
+    # Save to disk
+    (DATA_LM_PATH / 'tmp').mkdir(exist_ok=True)
+    np.save(DATA_LM_PATH / 'tmp' / 'tok_trn.npy', tok_trn)
+    np.save(DATA_LM_PATH / 'tmp' / 'tok_val.npy', tok_val)
+    tok_trn = np.load(DATA_LM_PATH / 'tmp' / 'tok_trn.npy')
+    tok_val = np.load(DATA_LM_PATH / 'tmp' / 'tok_val.npy')
 
-lr_dscr = lambda opt, lr, fctr=2.6: [lr / (fctr ** i) for i in range(len(opt.param_groups))[::-1]]
-update_lr(opt, lr_dscr(opt, bestlr))
+    freq = Counter(p for o in tok_trn for p in o)
+    # freq.most_common(25)
+    max_vocab = 60000
+    min_freq = 2
 
-if DEBUG:
-    print([x['lr'] for x in opt.param_groups])
+    itos = [o for o, c in freq.most_common(max_vocab) if c > min_freq]
+    itos.insert(0, '_pad_')
+    itos.insert(0, '_unk_')
 
-lr_args = {'iterations': len(data_fn(data['train']))*15, 'cut_frac': 0.1, 'ratio': 32}
-lr_schedule = lriters.LearningRateScheduler(opt, lr_args, lriters.SlantedTriangularLR)
-args['lr_schedule'] = lr_schedule
-args['epochs'] = 1
+    stoi = collections.defaultdict(lambda: 0, {v: k for k, v in enumerate(itos)})
+    if DEBUG:
+        print(len(itos))
 
-traces_main = loops.generic_loop(**args)
-traces = [a+b for a, b in zip(traces_start, traces_main)]
+    trn_lm = np.array([[stoi[o] for o in p] for p in tok_trn])
+    val_lm = np.array([[stoi[o] for o in p] for p in tok_val])
+    np.save(DATA_LM_PATH / 'tmp' / 'trn_ids.npy', trn_lm)
+    np.save(DATA_LM_PATH / 'tmp' / 'val_ids.npy', val_lm)
+    pickle.dump(itos, open(DATA_LM_PATH / 'tmp' / 'itos.pkl', 'wb'))
+    trn_lm = np.load(DATA_LM_PATH / 'tmp' / 'trn_ids.npy')
+    val_lm = np.load(DATA_LM_PATH / 'tmp' / 'val_ids.npy')
+    itos = pickle.load(open(DATA_LM_PATH / 'tmp' / 'itos.pkl', 'rb'))
+    vs = len(itos)
 
-# Dumping the traces
-with open('traces.pkl', 'wb+') as fl:
-    pickle.dump(traces, fl)
+    if DEBUG:
+        print(vs, len(trn_lm))
 
-torch.save(lm.state_dict(), PATH / 'unsup_model.torch')
-torch.save(lm.encoder.state_dict(), PATH / 'unsup_model_enc.torch')
+    """
+        Now we pull pretrained models from disk
+    """
+    em_sz, nh, nl = 400, 1150, 3
+    # PRE_PATH = PATH / 'models' / 'wt103'
+    # PRE_LM_PATH = PRE_PATH / 'fwd_wt103.h5'
+    wgts = torch.load(PRE_LM_PATH, map_location=lambda storage, loc: storage)
+    enc_wgts = core.to_np(wgts['0.encoder.weight'])
+    row_m = enc_wgts.mean(0)
+    itos2 = pickle.load((PRE_PATH / 'itos_wt103.pkl').open('rb'))
+    stoi2 = collections.defaultdict(lambda: -1, {v: k for k, v in enumerate(itos2)})
+    new_w = np.zeros((vs, em_sz), dtype=np.float32)
+    for i, w in enumerate(itos):
+        r = stoi2[w]
+        new_w[i] = enc_wgts[r] if r >= 0 else row_m
+
+    wgts['0.encoder.weight'] = T(new_w)
+    wgts['0.encoder_with_dropout.embed.weight'] = T(np.copy(new_w))
+    wgts['1.decoder.weight'] = T(np.copy(new_w))
+    wgts_enc = {'.'.join(k.split('.')[1:]): val
+                for k, val in wgts.items() if k[0] == '0'}
+    wgts_dec = {'.'.join(k.split('.')[1:]): val
+                for k, val in wgts.items() if k[0] == '1'}
+
+    wd = 1e-7
+    bptt = 70
+    bs = 24
+    opt_fn = partial(torch.optim.Adam, betas=(0.8, 0.99))  # @TODO: find real optimizer, and params
+
+    # Load the pre-trained model
+    parameter_dict = {'itos2': itos2}
+    dps = list(np.asarray([0.25, 0.1, 0.2, 0.02, 0.15]) * 0.7)
+    encargs = {'ntoken': new_w.shape[0],
+               'emb_sz': 400, 'n_hid': 1150,
+               'n_layers': 3, 'pad_token': 0,
+               'qrnn': False, 'dropouti': dps[0],
+               'wdrop': dps[2], 'dropoute': dps[3], 'dropouth': dps[4]}
+
+    # For now, lets assume our best lr = 0.001
+    bestlr = 0.001 * 10
+    lm = LanguageModel(parameter_dict, device, wgts_enc, wgts_dec, encargs)
+    opt = make_opt(lm, opt_fn, lr=bestlr)
+
+    data_fn = partial(text.LanguageModelLoader, bs=bs, bptt=bptt)
+    data = {'train': np.concatenate(trn_lm), 'valid': np.concatenate(val_lm)}
+    loss_fn = F.cross_entropy
+
+    '''
+        Schedule
+        
+        -> Freeze all but last layer, run for 1 epoch
+        -> Unfreeze all of it, and apply discriminative fine-tuning, train normally.
+    '''
+    for grp in opt.param_groups:
+        grp['lr'] = 0.0
+    opt.param_groups[0]['lr'] = 1e-3 / 2
+
+    # lr_args = {'batches':, 'cycles': 1}
+    lr_args = {'iterations': len(data_fn(data['train']))*1, 'cut_frac': 0.1, 'ratio': 32}
+    lr_schedule = lriters.LearningRateScheduler(opt, lr_args, lriters.SlantedTriangularLR)
+
+    args = {'epochs': 1, 'weight_decay': 0, 'data': data,
+            'device': device, 'opt': opt, 'loss_fn': loss_fn, 'train_fn': lm,
+            'predict_fn': lm.predict, 'data_fn': data_fn, 'model': lm,
+            'eval_fn': eval, 'epoch_start_hook': partial(loops.reset_hidden, lm),
+            'clip_grads_at': -1.0, 'lr_schedule': lr_schedule}
+    traces_start = loops.generic_loop(**args)
+
+    # Now unfreeze all layers and apply discr
+    for grp in opt.param_groups:
+        grp['lr'] = bestlr
+
+    lr_dscr = lambda opt, lr, fctr=2.6: [lr / (fctr ** i) for i in range(len(opt.param_groups))[::-1]]
+    update_lr(opt, lr_dscr(opt, bestlr))
+
+    if DEBUG:
+        print([x['lr'] for x in opt.param_groups])
+
+    lr_args = {'iterations': len(data_fn(data['train']))*15, 'cut_frac': 0.1, 'ratio': 32}
+    lr_schedule = lriters.LearningRateScheduler(opt, lr_args, lriters.SlantedTriangularLR)
+    args['lr_schedule'] = lr_schedule
+    args['epochs'] = 1
+
+    traces_main = loops.generic_loop(**args)
+    traces = [a+b for a, b in zip(traces_start, traces_main)]
+
+    # Dumping the traces
+    with open('traces.pkl', 'wb+') as fl:
+        pickle.dump(traces, fl)
+
+    torch.save(lm.state_dict(), PATH / 'unsup_model.torch')
+    torch.save(lm.encoder.state_dict(), PATH / 'unsup_model_enc.torch')
 
 
 
