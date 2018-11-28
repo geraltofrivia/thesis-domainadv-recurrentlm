@@ -1,5 +1,8 @@
 """
     Pulls an unsupervised fine tuned model from disk, also data, and goes to town on it.
+
+    @TODO: Add embeddings in layer
+    @TODO: Check if LR is reset after its fucked up by sltr
 """
 
 import html
@@ -59,6 +62,7 @@ CLASSES = ['neg', 'pos', 'unsup']
 class CustomEncoder(lm_rnn.MultiBatchRNN):
     @property
     def layers(self):
+        # TODO: ADD ENCODERR!!!!!!!!!!
         return torch.nn.ModuleList([torch.nn.ModuleList([self.rnns[0], self.dropouths[0]]),
                                     torch.nn.ModuleList([self.rnns[1], self.dropouths[1]]),
                                     torch.nn.ModuleList([self.rnns[2], self.dropouths[2]])])

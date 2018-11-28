@@ -43,25 +43,25 @@ class CustomLinear(text.LinearDecoder):
 class LanguageModel(nn.Module):
 
     def __init__(self,
-                 _parameter_dict,
                  _device,
                  _wgts_e,
-                 _wgts_d,
                  _encargs):
         super(LanguageModel, self).__init__()
 
-        self.parameter_dict = _parameter_dict
         self.device = _device
 
         self.encoder = CustomEncoder(**_encargs).to(self.device)
         self.encoder.load_state_dict(_wgts_e)
-        """
-            Explanation:
-                400*3 because input is [ h_T, maxpool, meanpool ]
-                0.4, 0.1 are drops at various layersLM_PATH
-        """
-        self.linear = CustomLinear(
+        self.decoder = CustomLinear(
             _encargs['ntoken'],
+            n_hid=400,
+            dropout=0.1 * 0.7,
+            tie_encoder=self.encoder.encoder,
+            bias=False
+        ).to(self.device)
+
+        self.domain = CustomLinear(
+            2,
             n_hid=400,
             dropout=0.1 * 0.7,
             tie_encoder=self.encoder.encoder,
@@ -74,20 +74,20 @@ class LanguageModel(nn.Module):
         op_p = self.encoder(x)
 
         # pos_batch = op_p[1][-1][-1]
-        score = self.linear(op_p)[0]
+        score = self.decoder(op_p)[0]
 
         return score
 
     @property
     def layers(self):
         layers = [x for x in self.encoder.layers]
-        layers += [x for x in self.linear.layers]
+        layers += [x for x in self.decoder.layers]
         return torch.nn.ModuleList(layers)
 
     @property
     def layers_rev(self):
         layers = [x for x in self.encoder.layers]
-        layers += [x for x in self.linear.layers]
+        layers += [x for x in self.decoder.layers]
         layers.reverse()
         return torch.nn.ModuleList(layers)
 
