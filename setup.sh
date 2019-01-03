@@ -27,7 +27,7 @@ tar -zxvf ./raw/imdb/aclImdb_v1.tar.gz -C ./raw/imdb/
 
 # Download Wikitext103
 mkdir raw/wikitext
-wget https://s3.amazonaws.com/research.metamind.io/wikitext/wikitext-103-v1.zip ./raw/wikitext/
+wget https://s3.amazonaws.com/research.metamind.io/wikitext/wikitext-103-v1.zip -P ./raw/wikitext/
 unzip ./raw/wikitext/wikitext-103-v1.zip -d ./raw/wikitext/
 
 # Download pretrained model

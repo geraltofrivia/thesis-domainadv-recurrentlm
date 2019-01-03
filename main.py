@@ -6,9 +6,11 @@ import pickle
 import re
 from functools import partial
 from pathlib import Path
+from typing import Callable
 
 import pandas as pd
 import sklearn
+from tqdm import tqdm
 
 os.environ['QT_QPA_PLATFORM']='offscreen'
 
@@ -21,7 +23,9 @@ import torch.tensor as T
 import torch.nn.functional as F
 
 # Mytorch imports
+from mytorch import loops as mtlp
 from mytorch.utils.goodies import *
+from mytorch import lriters as mtlr
 
 device = torch.device('cuda')
 np.random.seed(42)
@@ -48,6 +52,78 @@ PRE_LM_PATH = PRE_PATH / 'fwd_wt103.h5'
 CLASSES = ['neg', 'pos', 'unsup']
 WIKI_CLASSES = ['wiki.train.tokens', 'wiki.valid.tokens', 'wiki.test.tokens']
 
+
+'''
+    Data sampler for this training
+'''
+class DomainAgnosticSampler:
+    """ Sample data for language model training from two different domains in one batch. """
+
+    def __init__(self, data_fn, data_a, data_b):
+        """
+            Here, data_fn would be something like
+                `partial(text.LanguageModelLoader, bs=bs, bptt=bptt)`
+            And data_a/b would be something like
+                `{'train': np.concatenate(trn_lm), 'valid': np.concatenate(val_lm)}['train']`
+            data_fn (fastai's language model loader) flattens y and returns x of seqlen, batchsize
+        """
+        self.args = {'data_fn': data_fn, 'data_a': data_a, 'data_b': data_b}
+        self.reset(**self.args)
+
+    def reset(self, data_fn, data_a, data_b):
+        self.itera = iter(data_fn(data_a))
+        self.iterb = iter(data_fn(data_b))
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        x_a, y_a = self.itera.__next__()
+        x_b, y_b = self.iterb.__next__()
+        return self._combine_batch_(x_a, x_b, y_a, y_b)
+
+    def __len__(self):
+        return min(len(self.args['data_fn'](self.args['data_a'])),
+                   len(self.args['data_fn'](self.args['data_b'])))
+
+    @staticmethod
+    def _combine_batch_(x_a, x_b, y_a, y_b):
+        """
+            :param x_a is a np.arr looks like seqlen, batchsize
+            :param y_a is a corresponding np.arr (one word ahead than x_a) which is a flattened x_a.shape mat
+             Same for x_b, y_b
+
+             Returns x, y, y_dom in similar shapes as input
+        """
+
+        # Get them to interpretable shapes
+        y_a = y_a.reshape(x_a.shape).transpose(1, 0)
+        y_b = y_b.reshape(x_b.shape).transpose(1, 0)
+        x_a = x_a.transpose(1, 0)
+        x_b = x_b.transpose(1, 0)
+
+        b_bs, b_sl = x_a.shape[0], min(x_a.shape[1], x_b.shape[1])
+
+        # Concatenate to make an x and y
+        x = np.concatenate((x_a[:, :b_sl], x_b[:, :b_sl]))
+        y = np.concatenate((y_a[:, :b_sl], y_b[:, :b_sl]))
+
+        # Shuffle and remember shuffle index to make y labels for domain agnostic training
+        intrp = np.arange(b_bs * 2)
+        np.random.shuffle(intrp)
+        y_dom = (intrp >= b_bs) * 1
+        x = x[intrp]
+        y = y[intrp]
+
+        x = x.transpose(1, 0)
+        y = y.transpose(1, 0).reshape(np.prod(y.shape))
+
+        return x, y, y_dom
+
+
+'''
+    Start making data
+'''
 def get_texts_org(path):
     texts, labels = [], []
     for idx, label in enumerate(CLASSES):
@@ -285,27 +361,19 @@ class LanguageModel(nn.Module):
         ).to(self.device)
         self.encoder.reset()
 
-    def encode(self, x):
-        # Encoding all the data
-        return self.encoder(x)
+    def forward(self, x):
+        x_enc = self.encode(x)
+        return self.linear_dec(x_enc)[0]
 
-    def decode(self, x):
-        return self.linear_dec(x)[0]
-
-    def domain(self, x):
-        return self.linear_dom(x)[0]
+    def domain(self, x_enc):
+        x_enc = GradReverse.apply(x_enc)
+        return self.linear_dom(x_enc)[0]
 
     @property
     def layers(self):
         layers = [x for x in self.encoder.layers]
-        layers += [x for x in self.linear.layers]
-        return torch.nn.ModuleList(layers)
-
-    @property
-    def layers_rev(self):
-        layers = [x for x in self.encoder.layers]
-        layers += [x for x in self.linear.layers]
-        layers.reverse()
+        layers.append(torch.nn.ModuleList([x for x in self.linear_dec.layers]))
+        layers.append(torch.nn.ModuleList([x for x in self.linear_dom.layers]))
         return torch.nn.ModuleList(layers)
 
     def predict(self, x):
@@ -337,12 +405,41 @@ encargs = {'ntoken': new_w.shape[0],
 bestlr = 0.001 * 10
 lm = LanguageModel(parameter_dict, device, wgts_enc, wgts_dec, encargs)
 opt = make_opt(lm, opt_fn, lr=bestlr)
-
-data_fn = partial(text.LanguageModelLoader, bs=bs, bptt=bptt)
-data_imdb = {'train': np.concatenate(trn_lm), 'valid': np.concatenate(val_lm)}
-data_wiki = {'train': np.concatenate(wiki_trn_lm), 'valid': np.concatenate(wiki_val_lm)}
 loss_main_fn = F.cross_entropy
 loss_aux_fn = nn.BCELoss
+
+# Make data
+data_fn_unidomain = partial(text.LanguageModelLoader, bs=bs, bptt=bptt)
+data_imdb = {'train': np.concatenate(trn_lm), 'valid': np.concatenate(val_lm)}
+data_wiki = {'train': np.concatenate(wiki_trn_lm), 'valid': np.concatenate(wiki_val_lm)}
+data_fn = partial(DomainAgnosticSampler, data_fn=data_fn_unidomain)
+
+# Set up lr and freeze stuff
+for grp in opt.param_groups:
+    grp['lr'] = 0.0
+opt.param_groups[3]['lr'] = 1e-3 / 2
+opt.param_groups[4]['lr'] = 1e-3 / 2
+
+# lr_args = {'batches':, 'cycles': 1}
+lr_args = {'iterations': len(data_fn(data_wiki['train'], data_imdb['train'])), 'cut_frac': 0.1, 'ratio': 32}
+lr_schedule = mtlr.LearningRateScheduler(opt, lr_args, mtlr.SlantedTriangularLR)
+
+# @TODO: add dom agnostic thing to eval as well?
+def _eval(y_pred, y_true):
+    """
+        Expects a batch of input
+
+        :param y_pred: tensor of shape (b, nc)
+        :param y_true: tensor of shape (b, 1)
+    """
+    return torch.mean((torch.argmax(y_pred, dim=1) == y_true).float())
+
+
+args = {'epochs': 1, 'weight_decay': 0, 'data_a': data_imdb, 'data_b': data_wiki,
+        'device': device, 'opt': opt, 'loss_main_fn': loss_main_fn, 'loss_aux_fn': loss_aux_fn,
+        'train_fn': lm, 'train_aux_fn': lm.domain, 'predict_fn': lm.predict, 'data_fn': data_fn, 'model': lm,
+        'eval_fn': _eval, 'batch_start_hook': partial(mtlp.reset_hidden, lm),
+        'clip_grads_at': -1.0, 'lr_schedule': lr_schedule}
 
 '''
     Training loop
@@ -359,3 +456,168 @@ loss_aux_fn = nn.BCELoss
         - sample from imdb
             - same...
 '''
+def generic_loop(epochs: int,
+                 device: torch.device,
+                 opt: torch.optim,
+                 loss_main_fn: torch.nn,
+                 loss_aux_fn: torch.nn,
+                 model: torch.nn.Module,
+                 train_fn: Callable,
+                 train_aux_fn: Callable,
+                 predict_fn: Callable,
+                 data_a: dict,
+                 data_b: dict,
+                 data_fn: classmethod,
+                 epoch_start_hook: Callable = None,
+                 epoch_end_hook: Callable = None,
+                 batch_start_hook: Callable = None,
+                 batch_end_hook: Callable = None,
+                 weight_decay: float = 0.0,
+                 clip_grads_at: float = -1.0,
+                 lr_schedule=None,
+                 eval_fn: Callable = None) -> (list, list, list):
+    """
+
+        A generic training loop, which based on diff hook fns (defined below), should handle anything given to it.
+
+        The model need not be an nn.Module,
+             but should have correctly wired forward and a predict function.
+
+        Data should be a dict like so:
+            {"train":{"x":np.arr, "y":np.arr}, "val":{"x":np.arr, "y":np.arr} }
+
+        Train_fn must return both loss and y_pred
+
+    :param epochs: number of epochs to train for
+    :param data: data dict (structure specified above)
+    :param device: torch device to init the tensors with
+    :param opt: torch optimizer, with proper param_groups for better lr decay per laye
+    :param loss_main_fn: torch.nn loss fn for the actual thing
+    :param loss_aux_fn: torch.nn loss fn for the domain agnostic thing
+    :param model: torch module (for grad clipping)
+    :param train_fn: a function which takes x & y, returns loss and y_pred
+    :param train_aux_fn: a function which takes x & y, returns loss and y_pred_aux
+    :param predict_fn: a fn which takes x and returns y_pred
+    :param epoch_start_hook: a fn that can be called @ start of every epoch (returns model, opt)
+    :param epoch_end_hook: a fn that can be called @ end of every epoch (returns model, opt)
+    :param batch_start_hook: a fn that can be called @ start of every batch (returns model, opt)
+    :param batch_end_hook: a fn that can be called @r end of every batch (returns model, opt)
+    :param weight_decay: a L2 ratio (as mentioned in (https://arxiv.org/pdf/1711.05101.pdf)
+    :param clip_grads_at: in case you want gradients clipped, send the max val here
+    :param lr_schedule: a schedule that is called @ every batch start.
+    :param data_fn: a class to which we can pass X and Y, and get an iterator.
+    :param eval_fn: (optional) train_dom_fnfunction which when given pred and true, returns acc
+    :return: traces
+    """
+
+    train_loss = []
+    train_acc = []
+    val_acc = []
+    lrs = []
+
+    # Epoch level
+    for e in range(epochs):
+
+        per_epoch_loss = []
+        per_epoch_tr_acc = []
+
+        # Train
+        with Timer() as timer:
+
+            # @TODO: Add hook at start of epoch (how to decide what goes in)
+            if epoch_start_hook: epoch_start_hook()
+
+            # Make data
+            trn_dl, val_dl = data_fn(data_a['train'], data_b['train']), data_fn(data_a['valid'], data_b['valid'])
+
+            for x, y, y_aux in tqdm(trn_dl):
+
+                if batch_start_hook: batch_start_hook()
+                opt.zero_grad()
+
+                if lr_schedule: lrs.append(update_lr(opt, lr_schedule.get()))
+
+                # A: Normal stuff
+                _x = torch.tensor(x, dtype=torch.long, device=device)
+                _y = torch.tensor(y, dtype=torch.long, device=device)
+                op = train_fn(_x)
+                y_pred = op[0]
+                loss = loss_main_fn(y_pred, _y)
+
+                # Logging
+                per_epoch_tr_acc.append(eval_fn(y_pred=y_pred, y_true=_y).item())
+                per_epoch_loss.append(loss.item())
+
+                loss.backward()
+
+                # B: Domain agnostic stuff
+                y_pred_aux = train_aux_fn(op[1:])[0]
+                loss_aux = loss_aux_fn(y_pred_aux, y_aux)
+
+                # @TODO: logging here bitte
+                loss.backward()
+
+                # Optimizer Step
+                if clip_grads_at > 0.0: torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grads_at)
+                for group in opt.param_groups:
+                    for param in group['params']:
+                        param.data = param.data.add(-weight_decay * group['lr'], param.data)
+
+                opt.step()
+                if batch_end_hook: batch_end_hook()
+
+            if epoch_end_hook: epoch_end_hook()
+
+        # Val
+        with torch.no_grad():
+
+            per_epoch_vl_acc = []
+            for x, y in tqdm(val_dl):
+                _x = torch.tensor(x, dtype=torch.long, device=device)
+                _y = torch.tensor(y, dtype=torch.long, device=device)
+
+                y_pred = predict_fn(_x)
+
+                per_epoch_vl_acc.append(eval_fn(y_pred, _y).item())
+
+        # Bookkeep
+        train_acc.append(np.mean(per_epoch_tr_acc))
+        train_loss.append(np.mean(per_epoch_loss))
+        val_acc.append(np.mean(per_epoch_vl_acc))
+
+        print("Epoch: %(epo)03d | Loss: %(loss).5f | Tr_c: %(tracc)0.5f | Vl_c: %(vlacc)0.5f | Time: %(time).3f min"
+              % {'epo': e,
+                 'loss': float(np.mean(per_epoch_loss)),
+                 'tracc': float(np.mean(per_epoch_tr_acc)),
+                 'vlacc': float(np.mean(per_epoch_vl_acc)),
+                 'time': timer.interval / 60.0})
+
+    return train_acc, train_loss, val_acc, lrs
+
+
+traces_start = mtlp.generic_loop(**args)
+
+# Now unfreeze all layers and apply discr
+for grp in opt.param_groups:
+    grp['lr'] = bestlr
+
+lr_dscr = lambda opt, lr, fctr=2.6: [lr / (fctr ** i) for i in range(len(opt.param_groups))[::-1]]
+update_lr(opt, lr_dscr(opt, bestlr))
+
+if DEBUG:
+    print([x['lr'] for x in opt.param_groups])
+
+lr_args = {'iterations': len(data_fn(data_wiki['train'], data_imdb['train']))*15, 'cut_frac': 0.1, 'ratio': 32}
+lr_schedule = mtlr.LearningRateScheduler(opt, lr_args, mtlr.SlantedTriangularLR)
+args['lr_schedule'] = lr_schedule
+args['epochs'] = 1
+
+traces_main = mtlp.generic_loop(**args)
+traces = [a+b for a, b in zip(traces_start, traces_main)]
+
+# Dumping the traces
+with open('traces.pkl', 'wb+') as fl:
+    pickle.dump(traces, fl)
+
+torch.save(lm.state_dict(), PATH / 'unsup_model.torch')
+torch.save(lm.encoder.state_dict(), PATH / 'unsup_model_enc.torch')
