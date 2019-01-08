@@ -310,7 +310,7 @@ class CustomEncoder(lm_rnn.RNN_Encoder):
                                     torch.nn.ModuleList([self.rnns[2], self.dropouths[2]])])
 
 
-class CustomLinear(text.LinearDecoder):
+class CustomDecoder(text.LinearDecoder):
 
     @property
     def layers(self):
@@ -322,6 +322,19 @@ class CustomLinear(text.LinearDecoder):
         decoded = self.decoder(output.view(output.size(0) * output.size(1), output.size(2)))
         result = decoded.view(-1, decoded.size(1))
         return result, raw_outputs, outputs
+
+
+# class CustomLinear(text.LinearDecoder):
+#
+#     @property
+#     def layers(self):
+#         return torch.nn.ModuleList([self.decoder, self.dropout])
+#
+#     def forward(self, input):
+#         raw_outputs, outputs = input
+#         output = self.dropout(outputs[-1])
+#
+#         return output
 
 
 class LanguageModel(nn.Module):
@@ -344,7 +357,7 @@ class LanguageModel(nn.Module):
                 400*3 because input is [ h_T, maxpool, meanpool ]
                 0.4, 0.1 are drops at various layersLM_PATH
         """
-        self.linear_dec = CustomLinear(
+        self.linear_dec = CustomDecoder(
             _encargs['ntoken'],
             n_hid=400,
             dropout=0.1 * 0.7,
@@ -352,29 +365,33 @@ class LanguageModel(nn.Module):
             bias=False
         ).to(self.device)
 
-        self.linear_dom = CustomLinear(
-            _encargs['ntoken'],
-            n_hid=2,
-            dropout=0.1 * 0.7,
-            #             tie_encoder=self.encoder.encoder,
-            bias=False
-        ).to(self.device)
+        # self.linear_dom = CustomLinear(
+        #     2,
+        #     n_hid=400,
+        #     dropout=0.1 * 0.7,
+        #     #             tie_encoder=self.encoder.encoder,
+        #     bias=False
+        # ).to(self.device)
+        self.linear_dom = lm_rnn.PoolingLinearClassifier(layers=[400*3, 50, 2], drops=[0.2, 0.1]).to(self.device)
         self.encoder.reset()
 
+
     def forward(self, x):
-        x_enc = self.encode(x)
-        return self.linear_dec(x_enc)[0]
+        x_enc = self.encoder(x)
+        return self.linear_dec(x_enc)
 
     def domain(self, x_enc):
-        x_enc = GradReverse.apply(x_enc)
+        x_enc = list(x_enc)
+        x_enc[1] = [GradReverse.apply(enc_tensr) for enc_tensr in x_enc[1]]
         return self.linear_dom(x_enc)[0]
 
     @property
     def layers(self):
-        layers = [x for x in self.encoder.layers]
-        layers.append(torch.nn.ModuleList([x for x in self.linear_dec.layers]))
-        layers.append(torch.nn.ModuleList([x for x in self.linear_dom.layers]))
-        return torch.nn.ModuleList(layers)
+        # layers = [x for x in self.encoder.layers]
+        # layers.append(torch.nn.ModuleList([x for x in self.linear_dec.layers]))
+        # layers.append(torch.nn.ModuleList([x for x in self.linear_dom.layers]))
+        # return torch.nn.ModuleList(layers)
+        return self.encoder.layers.extend(self.linear_dec.layers).extend(self.linear_dom.layers)
 
     def predict(self, x):
         with torch.no_grad():
@@ -406,7 +423,7 @@ bestlr = 0.001 * 10
 lm = LanguageModel(parameter_dict, device, wgts_enc, wgts_dec, encargs)
 opt = make_opt(lm, opt_fn, lr=bestlr)
 loss_main_fn = F.cross_entropy
-loss_aux_fn = nn.BCELoss
+loss_aux_fn = F.cross_entropy
 
 # Make data
 data_fn_unidomain = partial(text.LanguageModelLoader, bs=bs, bptt=bptt)
@@ -421,8 +438,9 @@ opt.param_groups[3]['lr'] = 1e-3 / 2
 opt.param_groups[4]['lr'] = 1e-3 / 2
 
 # lr_args = {'batches':, 'cycles': 1}
-lr_args = {'iterations': len(data_fn(data_wiki['train'], data_imdb['train'])), 'cut_frac': 0.1, 'ratio': 32}
+lr_args = {'iterations': len(data_fn(data_a=data_wiki['train'], data_b=data_imdb['train'])), 'cut_frac': 0.1, 'ratio': 32}
 lr_schedule = mtlr.LearningRateScheduler(opt, lr_args, mtlr.SlantedTriangularLR)
+
 
 # @TODO: add dom agnostic thing to eval as well?
 def _eval(y_pred, y_true):
@@ -440,6 +458,7 @@ args = {'epochs': 1, 'weight_decay': 0, 'data_a': data_imdb, 'data_b': data_wiki
         'train_fn': lm, 'train_aux_fn': lm.domain, 'predict_fn': lm.predict, 'data_fn': data_fn, 'model': lm,
         'eval_fn': _eval, 'batch_start_hook': partial(mtlp.reset_hidden, lm),
         'clip_grads_at': -1.0, 'lr_schedule': lr_schedule}
+
 
 '''
     Training loop
@@ -528,7 +547,8 @@ def generic_loop(epochs: int,
             if epoch_start_hook: epoch_start_hook()
 
             # Make data
-            trn_dl, val_dl = data_fn(data_a['train'], data_b['train']), data_fn(data_a['valid'], data_b['valid'])
+            trn_dl = data_fn(data_a=data_a['train'], data_b=data_b['train'])
+            val_dl = data_fn(data_a=data_a['valid'], data_b=data_b['valid'])
 
             for x, y, y_aux in tqdm(trn_dl):
 
@@ -537,9 +557,12 @@ def generic_loop(epochs: int,
 
                 if lr_schedule: lrs.append(update_lr(opt, lr_schedule.get()))
 
-                # A: Normal stuff
+                # 0. Convert np arrs to torch tensors
                 _x = torch.tensor(x, dtype=torch.long, device=device)
                 _y = torch.tensor(y, dtype=torch.long, device=device)
+                _y_aux = torch.tensor(y_aux, dtype=torch.long, device=device)
+
+                # A: Normal stuff
                 op = train_fn(_x)
                 y_pred = op[0]
                 loss = loss_main_fn(y_pred, _y)
@@ -552,10 +575,10 @@ def generic_loop(epochs: int,
 
                 # B: Domain agnostic stuff
                 y_pred_aux = train_aux_fn(op[1:])[0]
-                loss_aux = loss_aux_fn(y_pred_aux, y_aux)
+                loss_aux = loss_aux_fn(y_pred_aux, _y_aux)
 
                 # @TODO: logging here bitte
-                loss.backward()
+                loss_aux.backward()
 
                 # Optimizer Step
                 if clip_grads_at > 0.0: torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grads_at)
@@ -595,7 +618,7 @@ def generic_loop(epochs: int,
     return train_acc, train_loss, val_acc, lrs
 
 
-traces_start = mtlp.generic_loop(**args)
+traces_start = generic_loop(**args)
 
 # Now unfreeze all layers and apply discr
 for grp in opt.param_groups:
@@ -607,12 +630,12 @@ update_lr(opt, lr_dscr(opt, bestlr))
 if DEBUG:
     print([x['lr'] for x in opt.param_groups])
 
-lr_args = {'iterations': len(data_fn(data_wiki['train'], data_imdb['train']))*15, 'cut_frac': 0.1, 'ratio': 32}
+lr_args = {'iterations': len(data_fn(data_a=data_wiki['train'], data_b=data_imdb['train']))*15, 'cut_frac': 0.1, 'ratio': 32}
 lr_schedule = mtlr.LearningRateScheduler(opt, lr_args, mtlr.SlantedTriangularLR)
 args['lr_schedule'] = lr_schedule
-args['epochs'] = 1
+args['epochs'] = 15
 
-traces_main = mtlp.generic_loop(**args)
+traces_main = generic_loop(**args)
 traces = [a+b for a, b in zip(traces_start, traces_main)]
 
 # Dumping the traces
