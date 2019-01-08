@@ -307,7 +307,7 @@ if __name__ == "__main__":
                'wdrop': dps[2], 'dropoute': dps[3], 'dropouth': dps[4]}
 
     # For now, lets assume our best lr = 0.001
-    bestlr = 0.001 * 10
+    bestlr = 0.001
     lm = LanguageModel(parameter_dict, device, wgts_enc, wgts_dec, encargs)
     opt = make_opt(lm, opt_fn, lr=bestlr)
 
@@ -349,7 +349,7 @@ if __name__ == "__main__":
     lr_args = {'iterations': len(data_fn(data['train']))*15, 'cut_frac': 0.1, 'ratio': 32}
     lr_schedule = lriters.LearningRateScheduler(opt, lr_args, lriters.SlantedTriangularLR)
     args['lr_schedule'] = lr_schedule
-    args['epochs'] = 1
+    args['epochs'] = 15
 
     traces_main = loops.generic_loop(**args)
     traces = [a+b for a, b in zip(traces_start, traces_main)]
