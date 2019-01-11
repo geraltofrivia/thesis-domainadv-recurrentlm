@@ -131,6 +131,7 @@ LM_PATH.mkdir(exist_ok=True)
 PRE_PATH = LM_PATH / 'wt103'
 PRE_LM_PATH = PRE_PATH / 'fwd_wt103.h5'
 CLASSES = ['neg', 'pos', 'unsup']
+TRIM = False    # Macro which aggressively crops the data.
 
 
 def get_texts_org(path):
@@ -174,6 +175,10 @@ if __name__ == "__main__":
 
     trn_texts, trn_labels = get_texts_org(DATA_PATH / 'train')
     val_texts, val_labels = get_texts_org(DATA_PATH / 'test')
+
+    if TRIM:
+        trn_texts, val_texts = trn_texts[:1000], val_texts[:1000]
+
     col_names = ['labels', 'text']
 
     if DEBUG:
