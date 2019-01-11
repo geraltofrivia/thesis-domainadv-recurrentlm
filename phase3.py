@@ -142,8 +142,7 @@ def fixup(x):
 
 def get_texts(df, n_lbls=1):
     labels = df.iloc[:, range(n_lbls)].values.astype(np.int64)
-    texts = f'\n{BOS} {FLD} 1 ' + df[n_lbls].astype(str)
-    for i in range(n_lbls + 1, len(df.columns)): texts += f' {FLD} {i-n_lbls} ' + df[i].astype(str)
+    texts = f'\n{BOS} {FLD} 1 ' + df.iloc[:, 1].astype(str)
     texts = list(texts.apply(fixup).values)
 
     tok = text.Tokenizer().proc_all_mp(core.partition_by_cores(texts))
@@ -151,22 +150,36 @@ def get_texts(df, n_lbls=1):
 
 
 def get_all(df, n_lbls):
-    tok, labels = [], []
-    for i, r in enumerate(df):
-        print(i)
-        tok_, labels_ = get_texts(r, n_lbls)
-        tok += tok_
-        labels += labels_
+    tok, labels = get_texts(df)
     return tok, labels
 
+
+def get_texts_org(path):
+    texts, labels = [], []
+    for idx, label in enumerate(CLASSES):
+        for fname in (path / label).glob('*.*'):
+            texts.append(fname.open('r', encoding='utf-8').read())
+            labels.append(idx)
+    return np.array(texts), np.array(labels)
+
+trn_texts, trn_labels = get_texts_org(DATA_PATH / 'train')
+val_texts, val_labels = get_texts_org(DATA_PATH / 'test')
+
+# Shuffle data
+np.random.seed(42)
+trn_idx = np.random.permutation(len(trn_texts))
+val_idx = np.random.permutation(len(val_texts))
+
+trn_texts, trn_labels = trn_texts[trn_idx], trn_labels[trn_idx]
+val_texts, val_labels = val_texts[val_idx], val_labels[val_idx]
+col_names = ['labels', 'text']
+
+df_trn = pd.DataFrame({'text': trn_texts, 'labels': trn_labels}, columns=col_names)
+df_val = pd.DataFrame({'text': val_texts, 'labels': val_labels}, columns=col_names)
 
 itos2 = pickle.load((DATA_LM_PATH / 'tmp' / 'itos.pkl').open('rb'))
 # stoi2 = collections.defaultdict(lambda: 0, {v: k for k, v in enumerate(itos2)})
 stoi2 = {v: k for k, v in enumerate(itos2)}
-
-chunksize = 24000
-df_trn = pd.read_csv(DATA_PROC_PATH / 'train.csv', header=None, chunksize=chunksize)
-df_val = pd.read_csv(DATA_PROC_PATH / 'test.csv', header=None, chunksize=chunksize)
 
 trn_clas, trn_labels = get_all(df_trn, 1)
 val_clas, val_labels = get_all(df_val, 1)
