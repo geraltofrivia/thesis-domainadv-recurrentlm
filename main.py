@@ -650,5 +650,6 @@ traces = [a+b for a, b in zip(traces_start, traces_main)]
 with open(PATH/'unsup_dann_traces.pkl', 'wb+') as fl:
     pickle.dump(traces, fl)
 
+pickle.dump(itos, open(DATA_LM_PATH / 'tmp' / 'itos_dann.pkl', 'wb'))
 torch.save(lm.state_dict(), PATH / 'unsup_dann_model.torch')
 torch.save(lm.encoder.state_dict(), PATH / 'unsup_dann_model_enc.torch')

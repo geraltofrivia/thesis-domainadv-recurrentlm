@@ -188,7 +188,9 @@ col_names = ['labels', 'text']
 df_trn = pd.DataFrame({'text': trn_texts, 'labels': trn_labels}, columns=col_names)
 df_val = pd.DataFrame({'text': val_texts, 'labels': val_labels}, columns=col_names)
 
-itos2 = pickle.load((DATA_LM_PATH / 'tmp' / 'itos.pkl').open('rb'))
+if DANN: itos_path = DATA_LM_PATH / 'tmp' / 'itos_dann.pkl'
+else: itos_path = DATA_LM_PATH / 'tmp' / 'itos.pkl'
+itos2 = pickle.load(itos_path.open('rb'))
 # stoi2 = collections.defaultdict(lambda: 0, {v: k for k, v in enumerate(itos2)})
 stoi2 = {v: k for k, v in enumerate(itos2)}
 
@@ -205,7 +207,7 @@ val_labels = [x for y in val_labels for x in y]
 '''
 dps = list(np.asarray([0.4, 0.5, 0.05, 0.3, 0.4]) * 0.5)
 # enc_wgts = torch.load(LM_PATH, map_location=lambda storage, loc: storage)
-enc_wgts = torch.load(PATH / 'unsup_model_enc.torch' if not DANN else 'unsup_dann_model_enc.torch',
+enc_wgts = torch.load(PATH / 'unsup_model_enc.torch' if not DANN else PATH/'unsup_dann_model_enc.torch',
                       map_location=lambda storage, loc: storage)
 clf = TextClassifier(device, len(itos2), dps, enc_wgts)
 
@@ -290,8 +292,8 @@ traces_new = loops.generic_loop(**args)
 traces = [a+b for a, b in zip(traces, traces_new)]
 
 # Dumping the traces
-with open(PATH/'sup_traces.pkl' if not DANN else 'sup_dann_traces.pkl', 'wb+') as fl:
+with open(PATH/'sup_traces.pkl' if not DANN else PATH/'sup_dann_traces.pkl', 'wb+') as fl:
     pickle.dump(traces, fl)
 
 # Dumping the model
-torch.save(clf.state_dict(), PATH / 'sup_model.torch' if not DANN else 'sup_dann_model.torch')
+torch.save(clf.state_dict(), PATH / 'sup_model.torch' if not DANN else PATH/'sup_dann_model.torch')
