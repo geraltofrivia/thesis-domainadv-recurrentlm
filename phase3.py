@@ -53,6 +53,7 @@ LM_PATH.mkdir(exist_ok=True)
 PRE_PATH = LM_PATH / 'wt103'
 PRE_LM_PATH = PRE_PATH / 'fwd_wt103.h5'
 CLASSES = ['neg', 'pos', 'unsup']
+TRIM = True
 
 '''
     Model code
@@ -165,10 +166,19 @@ def get_texts_org(path):
 trn_texts, trn_labels = get_texts_org(DATA_PATH / 'train')
 val_texts, val_labels = get_texts_org(DATA_PATH / 'test')
 
+# Lose label 2 from train
+trn_texts = trn_texts[trn_labels<2]
+trn_labels = trn_labels[trn_labels<2]
+
 # Shuffle data
-np.random.seed(42)
-trn_idx = np.random.permutation(len(trn_texts))
-val_idx = np.random.permutation(len(val_texts))
+if TRIM:
+    np.random.seed(42)
+    trn_idx = np.random.permutation(len(trn_texts))[:1000]
+    val_idx = np.random.permutation(len(val_texts))[:1000]
+else:
+    np.random.seed(42)
+    trn_idx = np.random.permutation(len(trn_texts))
+    val_idx = np.random.permutation(len(val_texts))
 
 trn_texts, trn_labels = trn_texts[trn_idx], trn_labels[trn_idx]
 val_texts, val_labels = val_texts[val_idx], val_labels[val_idx]

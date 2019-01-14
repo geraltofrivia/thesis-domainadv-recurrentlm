@@ -32,6 +32,7 @@ np.random.seed(42)
 torch.manual_seed(42)
 
 DEBUG = True
+TRIM=True
 
 # Path fields
 BOS = 'xbos'  # beginning-of-sentence tag
@@ -132,30 +133,37 @@ def get_texts_org(path):
             labels.append(idx)
     return np.array(texts), np.array(labels)
 
+
 trn_texts, trn_labels = get_texts_org(IMDB_DATA_PATH / 'train')
 val_texts, val_labels = get_texts_org(IMDB_DATA_PATH / 'test')
 col_names = ['labels', 'text']
 print(len(trn_texts), len(val_texts))
+
 
 def is_valid_sent(x):
     x = x.strip()
     if len(x) == 0: return False
     if x[0] == '=' and x[-1] == '=': return False
     return True
+
+
 def wiki_get_texts_org(path):
     texts = []
     for idx, label in enumerate(WIKI_CLASSES):
         with open(path / label, encoding='utf-8') as f:
             texts.append([sent.strip() for sent in f.readlines() if is_valid_sent(sent)])
     return tuple(texts)
+
+
 wiki_trn_texts, wiki_val_texts, wiki_tst_texts = wiki_get_texts_org(WIKI_DATA_PATH)
 print(len(wiki_trn_texts), len(wiki_val_texts))
 
 '''
     Crop data
 '''
-trn_texts, val_texts = trn_texts[:1000], val_texts[:1000]
-wiki_trn_texts, wiki_val_texts, wiki_tst_texts = wiki_trn_texts[:1000], wiki_val_texts[:1000], wiki_tst_texts[:1000]
+if TRIM:
+    trn_texts, val_texts = trn_texts[:1000], val_texts[:1000]
+    wiki_trn_texts, wiki_val_texts, wiki_tst_texts = wiki_trn_texts[:1000], wiki_val_texts[:1000], wiki_tst_texts[:1000]
 
 '''
     Shuffle data
@@ -642,5 +650,5 @@ traces = [a+b for a, b in zip(traces_start, traces_main)]
 with open('traces.pkl', 'wb+') as fl:
     pickle.dump(traces, fl)
 
-torch.save(lm.state_dict(), PATH / 'unsup_model.torch')
-torch.save(lm.encoder.state_dict(), PATH / 'unsup_model_enc.torch')
+torch.save(lm.state_dict(), PATH / 'unsup_dann_model.torch')
+torch.save(lm.encoder.state_dict(), PATH / 'unsup_dann_model_enc.torch')
