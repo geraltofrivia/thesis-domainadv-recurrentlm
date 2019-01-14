@@ -579,10 +579,10 @@ def generic_loop(epochs: int,
                 per_epoch_tr_acc.append(eval_fn(y_pred=y_pred, y_true=_y).item())
                 per_epoch_loss.append(loss.item())
 
-                loss.backward()
+                loss.backward(retain_graph=True)
 
                 # B: Domain agnostic stuff
-                y_pred_aux = train_aux_fn(op[1:])[0]
+                y_pred_aux = train_aux_fn(op[1:])
                 loss_aux = loss_aux_fn(y_pred_aux, _y_aux)
 
                 # @TODO: logging here bitte
@@ -647,7 +647,7 @@ traces_main = generic_loop(**args)
 traces = [a+b for a, b in zip(traces_start, traces_main)]
 
 # Dumping the traces
-with open('traces.pkl', 'wb+') as fl:
+with open(PATH/'unsup_dann_traces.pkl', 'wb+') as fl:
     pickle.dump(traces, fl)
 
 torch.save(lm.state_dict(), PATH / 'unsup_dann_model.torch')

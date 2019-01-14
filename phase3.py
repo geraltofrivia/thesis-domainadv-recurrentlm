@@ -37,6 +37,8 @@ torch.manual_seed(42)
 '''
 
 DEBUG = True
+DANN = True
+TRIM = True
 
 # Path fields
 BOS = 'xbos'  # beginning-of-sentence tag
@@ -53,7 +55,6 @@ LM_PATH.mkdir(exist_ok=True)
 PRE_PATH = LM_PATH / 'wt103'
 PRE_LM_PATH = PRE_PATH / 'fwd_wt103.h5'
 CLASSES = ['neg', 'pos', 'unsup']
-TRIM = True
 
 '''
     Model code
@@ -204,7 +205,8 @@ val_labels = [x for y in val_labels for x in y]
 '''
 dps = list(np.asarray([0.4, 0.5, 0.05, 0.3, 0.4]) * 0.5)
 # enc_wgts = torch.load(LM_PATH, map_location=lambda storage, loc: storage)
-enc_wgts = torch.load(PATH / 'unsup_model_enc.torch', map_location=lambda storage, loc: storage)
+enc_wgts = torch.load(PATH / 'unsup_model_enc.torch' if not DANN else 'unsup_dann_model_enc.torch',
+                      map_location=lambda storage, loc: storage)
 clf = TextClassifier(device, len(itos2), dps, enc_wgts)
 
 '''
@@ -254,33 +256,42 @@ args = {'epochs': 1, 'data': data, 'device': device,
     3. Train for 15 epochs (after all layers are unfrozen). Use 15 cycles for cosine annealing.
 '''
 # opt.param_groups[-1]['lr'] = 0.01
-loops.generic_loop(**args)
+traces = loops.generic_loop(**args)
 
 opt.param_groups[-2]['lr'] = 0.001
 lr_schedule = mtlr.LearningRateScheduler(opt, lr_args, mtlr.CosineAnnealingLR)
 args['lr_schedule'] = lr_schedule
-loops.generic_loop(**args)
+traces_new = loops.generic_loop(**args)
+traces = [a+b for a, b in zip(traces, traces_new)]
 
 opt.param_groups[-3]['lr'] = 0.0001
 lr_schedule = mtlr.LearningRateScheduler(opt, lr_args, mtlr.CosineAnnealingLR)
 args['lr_schedule'] = lr_schedule
-loops.generic_loop(**args)
+traces_new = loops.generic_loop(**args)
+traces = [a+b for a, b in zip(traces, traces_new)]
 
 opt.param_groups[-4]['lr'] = 0.0001
 lr_schedule = mtlr.LearningRateScheduler(opt, lr_args, mtlr.CosineAnnealingLR)
 args['lr_schedule'] = lr_schedule
-loops.generic_loop(**args)
+traces_new = loops.generic_loop(**args)
+traces = [a+b for a, b in zip(traces, traces_new)]
 
 opt.param_groups[-5]['lr'] = 0.0001
 lr_schedule = mtlr.LearningRateScheduler(opt, lr_args, mtlr.CosineAnnealingLR)
 args['lr_schedule'] = lr_schedule
-loops.generic_loop(**args)
+traces_new = loops.generic_loop(**args)
+traces = [a+b for a, b in zip(traces, traces_new)]
 
 lr_args['cycles'] = 15
 args['epochs'] = 15
 lr_schedule = mtlr.LearningRateScheduler(opt, lr_args, mtlr.CosineAnnealingLR)
 args['lr_schedule'] = lr_schedule
-loops.generic_loop(**args)
+traces_new = loops.generic_loop(**args)
+traces = [a+b for a, b in zip(traces, traces_new)]
 
+# Dumping the traces
+with open(PATH/'sup_traces.pkl' if not DANN else 'sup_dann_traces.pkl', 'wb+') as fl:
+    pickle.dump(traces, fl)
 
-torch.save(clf.state_dict(), PATH / 'sup_model.torch')
+# Dumping the model
+torch.save(clf.state_dict(), PATH / 'sup_model.torch' if not DANN else 'sup_dann_model.torch')
