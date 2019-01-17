@@ -332,17 +332,22 @@ class CustomDecoder(text.LinearDecoder):
         return result, raw_outputs, outputs
 
 
-# class CustomLinear(text.LinearDecoder):
-#
-#     @property
-#     def layers(self):
-#         return torch.nn.ModuleList([self.decoder, self.dropout])
-#
-#     def forward(self, input):
-#         raw_outputs, outputs = input
-#         output = self.dropout(outputs[-1])
-#
-#         return output
+class CustomLinear(lm_rnn.PoolingLinearClassifier):
+
+    def forward(self, input):
+        raw_outputs, outputs = input
+        output = outputs[-1]
+        sl,bs,_ = output.size()
+        avgpool = self.pool(output, bs, False)
+        mxpool = self.pool(output, bs, True)
+        x = torch.cat([output[-1], mxpool, avgpool], 1)
+        for i, l in enumerate(self.layers):
+            l_x = l(x)
+            if i != len(self.layers) -1:
+                x = F.relu(l_x)
+            else:
+                x = torch.sigmoid(l_x)
+        return l_x, raw_outputs, outputs
 
 
 class LanguageModel(nn.Module):
@@ -380,7 +385,7 @@ class LanguageModel(nn.Module):
         #     #             tie_encoder=self.encoder.encoder,
         #     bias=False
         # ).to(self.device)
-        self.linear_dom = lm_rnn.PoolingLinearClassifier(layers=[400*3, 50, 2], drops=[0.2, 0.1]).to(self.device)
+        self.linear_dom = CustomLinear(layers=[400*3, 50, 2], drops=[0.2, 0.1]).to(self.device)
         self.encoder.reset()
 
 
@@ -461,10 +466,14 @@ def _eval(y_pred, y_true):
     return torch.mean((torch.argmax(y_pred, dim=1) == y_true).float())
 
 
+def _eval_dann(y_pred, y_true):
+    return torch.mean((y_pred.round() == y_true).float())
+
+
 args = {'epochs': 1, 'weight_decay': 0, 'data_a': data_imdb, 'data_b': data_wiki,
         'device': device, 'opt': opt, 'loss_main_fn': loss_main_fn, 'loss_aux_fn': loss_aux_fn,
         'train_fn': lm, 'train_aux_fn': lm.domain, 'predict_fn': lm.predict, 'data_fn': data_fn, 'model': lm,
-        'eval_fn': _eval, 'batch_start_hook': partial(mtlp.reset_hidden, lm),
+        'eval_fn': _eval, 'eval_aux_fn': _eval_dann, 'batch_start_hook': partial(mtlp.reset_hidden, lm),
         'clip_grads_at': -1.0, 'lr_schedule': lr_schedule}
 
 
@@ -502,7 +511,8 @@ def generic_loop(epochs: int,
                  weight_decay: float = 0.0,
                  clip_grads_at: float = -1.0,
                  lr_schedule=None,
-                 eval_fn: Callable = None) -> (list, list, list):
+                 eval_fn: Callable = None,
+                 eval_aux_fn: Callable = None) -> (list, list, list):
     """
 
         A generic training loop, which based on diff hook fns (defined below), should handle anything given to it.
@@ -533,12 +543,14 @@ def generic_loop(epochs: int,
     :param clip_grads_at: in case you want gradients clipped, send the max val here
     :param lr_schedule: a schedule that is called @ every batch start.
     :param data_fn: a class to which we can pass X and Y, and get an iterator.
-    :param eval_fn: (optional) train_dom_fnfunction which when given pred and true, returns acc
+    :param eval_fn: function which when given pred and true, returns acc
+    :param eval_aux_fn: same as eval_fn but for domain classifier's output.
     :return: traces
     """
 
     train_loss = []
     train_acc = []
+    train_acc_aux = []
     val_acc = []
     lrs = []
 
@@ -547,6 +559,7 @@ def generic_loop(epochs: int,
 
         per_epoch_loss = []
         per_epoch_tr_acc = []
+        per_epoch_tr_acc_aux = []
 
         # Train
         with Timer() as timer:
@@ -575,18 +588,20 @@ def generic_loop(epochs: int,
                 y_pred = op[0]
                 loss = loss_main_fn(y_pred, _y)
 
-                # Logging
-                per_epoch_tr_acc.append(eval_fn(y_pred=y_pred, y_true=_y).item())
-                per_epoch_loss.append(loss.item())
-
+                # Pass regular gradients
                 loss.backward(retain_graph=True)
 
                 # B: Domain agnostic stuff
                 y_pred_aux = train_aux_fn(op[1:])
                 loss_aux = loss_aux_fn(y_pred_aux, _y_aux)
 
-                # @TODO: logging here bitte
-                loss_aux.backward()
+                # Logging
+                per_epoch_tr_acc.append(eval_fn(y_pred=y_pred, y_true=_y).item())
+                per_epoch_tr_acc_aux.append(eval_fn(y_pred=y_pred_aux, y_true=_y_aux).item())
+                per_epoch_loss.append(loss.item())
+
+                # Pass aux gradients
+                loss_aux.backward(retain_graph=False)
 
                 # Optimizer Step
                 if clip_grads_at > 0.0: torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grads_at)
@@ -603,27 +618,30 @@ def generic_loop(epochs: int,
         with torch.no_grad():
 
             per_epoch_vl_acc = []
-            for x, y in tqdm(val_dl):
+            for x, y, y_aux in tqdm(val_dl):
                 _x = torch.tensor(x, dtype=torch.long, device=device)
                 _y = torch.tensor(y, dtype=torch.long, device=device)
 
-                y_pred = predict_fn(_x)
+                y_pred = predict_fn(_x)[0]
 
                 per_epoch_vl_acc.append(eval_fn(y_pred, _y).item())
 
         # Bookkeep
         train_acc.append(np.mean(per_epoch_tr_acc))
+        train_acc_aux.append(np.mean(per_epoch_tr_acc_aux))
         train_loss.append(np.mean(per_epoch_loss))
         val_acc.append(np.mean(per_epoch_vl_acc))
 
-        print("Epoch: %(epo)03d | Loss: %(loss).5f | Tr_c: %(tracc)0.5f | Vl_c: %(vlacc)0.5f | Time: %(time).3f min"
+        print("Epoch: %(epo)03d | Loss: %(loss).5f | Tr_c: %(tracc)0.5f | Tr_aux: %(tracc_aux)0.5f | "
+              "Vl_c: %(vlacc)0.5f | Time: %(time).3f min"
               % {'epo': e,
                  'loss': float(np.mean(per_epoch_loss)),
                  'tracc': float(np.mean(per_epoch_tr_acc)),
+                 'tracc_aux': float(np.mean(per_epoch_tr_acc_aux)),
                  'vlacc': float(np.mean(per_epoch_vl_acc)),
                  'time': timer.interval / 60.0})
 
-    return train_acc, train_loss, val_acc, lrs
+    return train_acc, train_acc_aux, train_loss, val_acc, lrs
 
 
 traces_start = generic_loop(**args)
@@ -647,9 +665,11 @@ traces_main = generic_loop(**args)
 traces = [a+b for a, b in zip(traces_start, traces_main)]
 
 # Dumping the traces
-with open(PATH/'unsup_dann_traces.pkl', 'wb+') as fl:
+DUMPPATH = PATH / 'dann_trim_default'
+with open(DUMPPATH/'unsup_dann_traces.pkl', 'wb+') as fl:
     pickle.dump(traces, fl)
 
-pickle.dump(itos, open(DATA_LM_PATH / 'tmp' / 'itos_dann.pkl', 'wb'))
-torch.save(lm.state_dict(), PATH / 'unsup_dann_model.torch')
-torch.save(lm.encoder.state_dict(), PATH / 'unsup_dann_model_enc.torch')
+# The vocab and the models
+pickle.dump(itos, open(DUMPPATH / 'itos.pkl', 'wb'))
+torch.save(lm.state_dict(), DUMPPATH / 'unsup_model.torch')
+torch.save(lm.encoder.state_dict(), DUMPPATH / 'unsup_model_enc.torch')

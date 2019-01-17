@@ -56,11 +56,14 @@ PRE_PATH = LM_PATH / 'wt103'
 PRE_LM_PATH = PRE_PATH / 'fwd_wt103.h5'
 CLASSES = ['neg', 'pos', 'unsup']
 
+src = 'dann' if DANN else 'phase2'
+datasize = 'trim' if TRIM else 'full'
+DUMPPATH = PATH / f'{src}_{datasize}_default'
+
+
 '''
     Model code
 '''
-
-
 class CustomEncoder(lm_rnn.MultiBatchRNN):
     @property
     def layers(self):
@@ -188,10 +191,8 @@ col_names = ['labels', 'text']
 df_trn = pd.DataFrame({'text': trn_texts, 'labels': trn_labels}, columns=col_names)
 df_val = pd.DataFrame({'text': val_texts, 'labels': val_labels}, columns=col_names)
 
-if DANN: itos_path = DATA_LM_PATH / 'tmp' / 'itos_dann.pkl'
-else: itos_path = DATA_LM_PATH / 'tmp' / 'itos.pkl'
+itos_path = DUMPPATH / 'itos.pkl'
 itos2 = pickle.load(itos_path.open('rb'))
-# stoi2 = collections.defaultdict(lambda: 0, {v: k for k, v in enumerate(itos2)})
 stoi2 = {v: k for k, v in enumerate(itos2)}
 
 trn_clas, trn_labels = get_all(df_trn, 1)

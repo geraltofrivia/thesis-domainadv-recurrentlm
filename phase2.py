@@ -360,11 +360,13 @@ if __name__ == "__main__":
     traces = [a+b for a, b in zip(traces_start, traces_main)]
 
     # Dumping the traces
-    with open('traces.pkl', 'wb+') as fl:
+    DUMPPATH = PATH / 'phase2_default'
+    with open(DUMPPATH / 'traces.pkl', 'wb+') as fl:
         pickle.dump(traces, fl)
 
-    torch.save(lm.state_dict(), PATH / 'unsup_model.torch')
-    torch.save(lm.encoder.state_dict(), PATH / 'unsup_model_enc.torch')
+    pickle.dump(itos, open(DUMPPATH / 'itos.pkl', 'wb'))
+    torch.save(lm.state_dict(), DUMPPATH / 'unsup_model.torch')
+    torch.save(lm.encoder.state_dict(), DUMPPATH / 'unsup_model_enc.torch')
 
 
 

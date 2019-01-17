@@ -41,3 +41,7 @@ mkdir resources/proc/imdb
 mkdir resources/proc/imdb/data
 mkdir resources/proc/imdb/datalm
 mkdir resources/proc/imdb/model
+mkdir resources/proc/imdb/dann_trim_default
+mkdir resources/proc/imdb/dann_full_default
+mkdir resources/proc/imdb/phase2_trim_default
+mkdir resources/proc/imdb/phase2_full_default
