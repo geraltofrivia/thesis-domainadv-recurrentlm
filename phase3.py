@@ -208,8 +208,7 @@ val_labels = [x for y in val_labels for x in y]
 '''
 dps = list(np.asarray([0.4, 0.5, 0.05, 0.3, 0.4]) * 0.5)
 # enc_wgts = torch.load(LM_PATH, map_location=lambda storage, loc: storage)
-enc_wgts = torch.load(PATH / 'unsup_model_enc.torch' if not DANN else PATH/'unsup_dann_model_enc.torch',
-                      map_location=lambda storage, loc: storage)
+enc_wgts = torch.load(DUMPPATH / 'unsup_model_enc.torch', map_location=lambda storage, loc: storage)
 clf = TextClassifier(device, len(itos2), dps, enc_wgts)
 
 '''
@@ -293,8 +292,8 @@ traces_new = loops.generic_loop(**args)
 traces = [a+b for a, b in zip(traces, traces_new)]
 
 # Dumping the traces
-with open(PATH/'sup_traces.pkl' if not DANN else PATH/'sup_dann_traces.pkl', 'wb+') as fl:
+with open(DUMPPATH/'sup_traces.pkl', 'wb+') as fl:
     pickle.dump(traces, fl)
 
 # Dumping the model
-torch.save(clf.state_dict(), PATH / 'sup_model.torch' if not DANN else PATH/'sup_dann_model.torch')
+torch.save(clf.state_dict(), DUMPPATH / 'sup_model.torch')
