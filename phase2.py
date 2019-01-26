@@ -21,7 +21,7 @@ import torch.tensor as T
 import torch.nn.functional as F
 
 # Mytorch imports
-from mytorch import loops, lriters
+from mytorch import loops, lriters as mtlr
 from mytorch.utils.goodies import *
 
 device = torch.device('cuda')
@@ -332,7 +332,7 @@ if __name__ == "__main__":
 
     # lr_args = {'batches':, 'cycles': 1}
     lr_args = {'iterations': len(data_fn(data['train']))*1, 'cut_frac': 0.1, 'ratio': 32}
-    lr_schedule = lriters.LearningRateScheduler(opt, lr_args, lriters.SlantedTriangularLR)
+    lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.SlantedTriangularLR)
 
     args = {'epochs': 1, 'weight_decay': 0, 'data': data,
             'device': device, 'opt': opt, 'loss_fn': loss_fn, 'train_fn': lm,
@@ -352,7 +352,7 @@ if __name__ == "__main__":
         print([x['lr'] for x in opt.param_groups])
 
     lr_args = {'iterations': len(data_fn(data['train']))*15, 'cut_frac': 0.1, 'ratio': 32}
-    lr_schedule = lriters.LearningRateScheduler(opt, lr_args, lriters.SlantedTriangularLR)
+    lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.SlantedTriangularLR)
     args['lr_schedule'] = lr_schedule
     args['epochs'] = 15
 
@@ -360,7 +360,7 @@ if __name__ == "__main__":
     traces = [a+b for a, b in zip(traces_start, traces_main)]
 
     # Dumping the traces
-    DUMPPATH = PATH / 'phase2_default'
+    DUMPPATH = PATH / 'phase2_trim_default'
     with open(DUMPPATH / 'traces.pkl', 'wb+') as fl:
         pickle.dump(traces, fl)
 

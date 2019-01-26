@@ -12,7 +12,7 @@ import pandas as pd
 import sklearn
 from tqdm import tqdm
 
-os.environ['QT_QPA_PLATFORM']='offscreen'
+os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 
 # FastAI Imports
 from fastai import text, core, lm_rnn
@@ -224,6 +224,7 @@ def get_all(df, n_lbls):
         labels += labels_
     return tok, labels
 
+
 trn_texts, val_texts = sklearn.model_selection.train_test_split(
         np.concatenate([trn_texts, val_texts]), test_size=0.1)
 
@@ -388,7 +389,6 @@ class LanguageModel(nn.Module):
         self.linear_dom = CustomLinear(layers=[400*3, 50, 2], drops=[0.2, 0.1]).to(self.device)
         self.encoder.reset()
 
-
     def forward(self, x):
         x_enc = self.encoder(x)
         return self.linear_dec(x_enc)
@@ -432,7 +432,7 @@ encargs = {'ntoken': new_w.shape[0],
            'wdrop': dps[2], 'dropoute': dps[3], 'dropouth': dps[4]}
 
 # For now, lets assume our best lr = 0.001
-bestlr = 0.001 * 10
+bestlr = 0.003
 lm = LanguageModel(parameter_dict, device, wgts_enc, wgts_dec, encargs)
 opt = make_opt(lm, opt_fn, lr=bestlr)
 loss_main_fn = F.cross_entropy
@@ -447,12 +447,12 @@ data_fn = partial(DomainAgnosticSampler, data_fn=data_fn_unidomain)
 # Set up lr and freeze stuff
 for grp in opt.param_groups:
     grp['lr'] = 0.0
-opt.param_groups[3]['lr'] = 1e-3 / 2
-opt.param_groups[4]['lr'] = 1e-3 / 2
+opt.param_groups[3]['lr'] = bestlr
+opt.param_groups[4]['lr'] = bestlr
 
 # lr_args = {'batches':, 'cycles': 1}
 lr_args = {'iterations': len(data_fn(data_a=data_wiki['train'], data_b=data_imdb['train'])), 'cut_frac': 0.1, 'ratio': 32}
-lr_schedule = mtlr.LearningRateScheduler(opt, lr_args, mtlr.SlantedTriangularLR)
+lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.SlantedTriangularLR)
 
 
 # @TODO: add dom agnostic thing to eval as well?
@@ -467,7 +467,7 @@ def _eval(y_pred, y_true):
 
 
 def _eval_dann(y_pred, y_true):
-    return torch.mean((y_pred.round() == y_true).float())
+    return torch.mean((torch.argmax(y_pred, dim=1) == y_true).float())
 
 
 args = {'epochs': 1, 'weight_decay': 0, 'data_a': data_imdb, 'data_b': data_wiki,
@@ -597,7 +597,7 @@ def generic_loop(epochs: int,
 
                 # Logging
                 per_epoch_tr_acc.append(eval_fn(y_pred=y_pred, y_true=_y).item())
-                per_epoch_tr_acc_aux.append(eval_fn(y_pred=y_pred_aux, y_true=_y_aux).item())
+                per_epoch_tr_acc_aux.append(eval_aux_fn(y_pred=y_pred_aux, y_true=_y_aux).item())
                 per_epoch_loss.append(loss.item())
 
                 # Pass aux gradients
@@ -657,7 +657,7 @@ if DEBUG:
     print([x['lr'] for x in opt.param_groups])
 
 lr_args = {'iterations': len(data_fn(data_a=data_wiki['train'], data_b=data_imdb['train']))*15, 'cut_frac': 0.1, 'ratio': 32}
-lr_schedule = mtlr.LearningRateScheduler(opt, lr_args, mtlr.SlantedTriangularLR)
+lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.SlantedTriangularLR)
 args['lr_schedule'] = lr_schedule
 args['epochs'] = 15
 
@@ -666,7 +666,7 @@ traces = [a+b for a, b in zip(traces_start, traces_main)]
 
 # Dumping the traces
 DUMPPATH = PATH / 'dann_trim_default'
-with open(DUMPPATH/'unsup_dann_traces.pkl', 'wb+') as fl:
+with open(DUMPPATH/'unsup_traces.pkl', 'wb+') as fl:
     pickle.dump(traces, fl)
 
 # The vocab and the models

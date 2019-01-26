@@ -226,7 +226,7 @@ data = {'train': {'x': trn_clas, 'y': trn_labels}, 'valid': {'x': val_clas, 'y':
 
 # Make lr scheduler
 lr_args = {'iterations': len(data_fn(data['train'])), 'cycles': 1}
-lr_schedule = mtlr.LearningRateScheduler(opt, lr_args, mtlr.CosineAnnealingLR)
+lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
 
 
 def epoch_end_hook() -> None:
@@ -260,33 +260,48 @@ args = {'epochs': 1, 'data': data, 'device': device,
 # opt.param_groups[-1]['lr'] = 0.01
 traces = loops.generic_loop(**args)
 
-opt.param_groups[-2]['lr'] = 0.001
-lr_schedule = mtlr.LearningRateScheduler(opt, lr_args, mtlr.CosineAnnealingLR)
+opt.param_groups[-1]['lr'] = 0.01
+opt.param_groups[-2]['lr'] = 0.005
+lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
 args['lr_schedule'] = lr_schedule
 traces_new = loops.generic_loop(**args)
 traces = [a+b for a, b in zip(traces, traces_new)]
 
-opt.param_groups[-3]['lr'] = 0.0001
-lr_schedule = mtlr.LearningRateScheduler(opt, lr_args, mtlr.CosineAnnealingLR)
+opt.param_groups[-1]['lr'] = 0.01
+opt.param_groups[-2]['lr'] = 0.005
+opt.param_groups[-3]['lr'] = 0.001
+lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
 args['lr_schedule'] = lr_schedule
 traces_new = loops.generic_loop(**args)
 traces = [a+b for a, b in zip(traces, traces_new)]
 
-opt.param_groups[-4]['lr'] = 0.0001
-lr_schedule = mtlr.LearningRateScheduler(opt, lr_args, mtlr.CosineAnnealingLR)
+opt.param_groups[-1]['lr'] = 0.01
+opt.param_groups[-2]['lr'] = 0.005
+opt.param_groups[-3]['lr'] = 0.001
+opt.param_groups[-4]['lr'] = 0.001
+lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
 args['lr_schedule'] = lr_schedule
 traces_new = loops.generic_loop(**args)
 traces = [a+b for a, b in zip(traces, traces_new)]
 
-opt.param_groups[-5]['lr'] = 0.0001
-lr_schedule = mtlr.LearningRateScheduler(opt, lr_args, mtlr.CosineAnnealingLR)
+opt.param_groups[-1]['lr'] = 0.01
+opt.param_groups[-2]['lr'] = 0.005
+opt.param_groups[-3]['lr'] = 0.001
+opt.param_groups[-4]['lr'] = 0.001
+opt.param_groups[-5]['lr'] = 0.001
+lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
 args['lr_schedule'] = lr_schedule
 traces_new = loops.generic_loop(**args)
 traces = [a+b for a, b in zip(traces, traces_new)]
 
+opt.param_groups[-1]['lr'] = 0.01
+opt.param_groups[-2]['lr'] = 0.005
+opt.param_groups[-3]['lr'] = 0.001
+opt.param_groups[-4]['lr'] = 0.001
+opt.param_groups[-5]['lr'] = 0.001
 lr_args['cycles'] = 15
 args['epochs'] = 15
-lr_schedule = mtlr.LearningRateScheduler(opt, lr_args, mtlr.CosineAnnealingLR)
+lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
 args['lr_schedule'] = lr_schedule
 traces_new = loops.generic_loop(**args)
 traces = [a+b for a, b in zip(traces, traces_new)]

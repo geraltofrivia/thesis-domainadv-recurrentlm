@@ -1,12 +1,9 @@
 # Major TODOs
 
-1. Check if gradients are actually reversed.
-
-    a. Check if the gradients are reversed according to specification
-    
-2. Get Domain Classification Accuracy
-    
-    
-# Hyper Parameter Tuning
-
-Chalk out a schedule.
+- ~~Check if gradients are actually reversed.~~
+    - ~~Check if the gradients are reversed according to specification~~
+- ~~Get Domain Classification Accuracy~~
+     
+- Fix all hyperparams as the same as the org implementation
+- Run it in default setting and replicate their results verbatim
+    - Try to run their results without mixing val data during phase 2.   
