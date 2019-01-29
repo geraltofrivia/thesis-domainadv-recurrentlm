@@ -1,3 +1,10 @@
-2Trim,2DANN-trnacc,2DANN-valacc,2DANN-domacc,2DANN-domacc-BEST,2Normal-trnacc,2Normal-valacc,3DANN-trnacc,3DANN-valacc,3Normal-trnacc,3Normal-val,changes,
-True,0.27348,0.28220,0.73353,0.70702,0.26997,0.26818,0.76042,0.74058,0.77728,0.77480,-,
-True,0.27568,0.28214,0.70743,0.69752,,,0.98611,0.86112,0.98810,0.85665,,
+2Trim,2DANN-trnacc,2DANN-valacc,2DANN-domacc,2DANN-domacc-BEST,2Normal-trnacc,2Normal-valacc,3DANN-trnacc,3DANN-valacc,3DANN-valacc-best,3Normal-trnacc,3Normal-val,changes,params
+True,0.27348,0.28220,0.73353,0.70702,0.26997,0.26818,0.76042,0.74058,,0.77728,0.77480,-,
+True,0.27568,0.28214,0.70743,0.69752,,,0.98611,0.86112,,0.98810,0.85665,,
+,0.32317,0.29637,0.55181,0.44928,,,0.98413,0.85615,0.87252,,,,"dps = list(np.asarray([0.25 0.1 0.2 0.02 0.15]) * 0.7)
+lr_cutfrac = 0.1
+bestlr = 0.003
+lr_ratio = 32
+lr_dscr = 1.3
+weight_decay = 0.0
+clip_grads_at = -1.0"

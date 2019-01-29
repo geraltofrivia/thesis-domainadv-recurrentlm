@@ -55,6 +55,20 @@ WIKI_CLASSES = ['wiki.train.tokens', 'wiki.valid.tokens', 'wiki.test.tokens']
 
 
 '''
+    Hyperparams w.r.t. the training of this thing.
+'''
+class params(object):
+    dps = list(np.asarray([0.25, 0.1, 0.2, 0.02, 0.15]) * 0.7)
+    lr_cutfrac = 0.1
+    bestlr = 0.003
+    lr_ratio = 32
+    lr_dscr = 1.3
+    weight_decay = 0.0
+    clip_grads_at = -1.0
+
+
+
+'''
     Data sampler for this training
 '''
 class DomainAgnosticSampler:
@@ -424,7 +438,7 @@ opt_fn = partial(torch.optim.Adam, betas=(0.8, 0.99))  # @TODO: find real optimi
 
 # Load the pre-trained model
 parameter_dict = {'itos2': itos2}
-dps = list(np.asarray([0.25, 0.1, 0.2, 0.02, 0.15]) * 0.7)
+dps = params.dps
 encargs = {'ntoken': new_w.shape[0],
            'emb_sz': 400, 'n_hid': 1150,
            'n_layers': 3, 'pad_token': 0,
@@ -432,9 +446,8 @@ encargs = {'ntoken': new_w.shape[0],
            'wdrop': dps[2], 'dropoute': dps[3], 'dropouth': dps[4]}
 
 # For now, lets assume our best lr = 0.001
-bestlr = 0.003
 lm = LanguageModel(parameter_dict, device, wgts_enc, wgts_dec, encargs)
-opt = make_opt(lm, opt_fn, lr=bestlr)
+opt = make_opt(lm, opt_fn, lr=params.bestlr)
 loss_main_fn = F.cross_entropy
 loss_aux_fn = F.cross_entropy
 
@@ -447,11 +460,12 @@ data_fn = partial(DomainAgnosticSampler, data_fn=data_fn_unidomain)
 # Set up lr and freeze stuff
 for grp in opt.param_groups:
     grp['lr'] = 0.0
-opt.param_groups[3]['lr'] = bestlr
-opt.param_groups[4]['lr'] = bestlr
+opt.param_groups[3]['lr'] = params.bestlr
+opt.param_groups[4]['lr'] = params.bestlr
 
 # lr_args = {'batches':, 'cycles': 1}
-lr_args = {'iterations': len(data_fn(data_a=data_wiki['train'], data_b=data_imdb['train'])), 'cut_frac': 0.1, 'ratio': 32}
+lr_args = {'iterations': len(data_fn(data_a=data_wiki['train'], data_b=data_imdb['train'])),
+           'cut_frac': params.lr_cutfrac, 'ratio': params.lr_ratio}
 lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.SlantedTriangularLR)
 
 
@@ -470,11 +484,11 @@ def _eval_dann(y_pred, y_true):
     return torch.mean((torch.argmax(y_pred, dim=1) == y_true).float())
 
 
-args = {'epochs': 1, 'weight_decay': 0, 'data_a': data_imdb, 'data_b': data_wiki,
+args = {'epochs': 1, 'weight_decay': params.weight_decay, 'data_a': data_imdb, 'data_b': data_wiki,
         'device': device, 'opt': opt, 'loss_main_fn': loss_main_fn, 'loss_aux_fn': loss_aux_fn,
         'train_fn': lm, 'train_aux_fn': lm.domain, 'predict_fn': lm.predict, 'data_fn': data_fn, 'model': lm,
         'eval_fn': _eval, 'eval_aux_fn': _eval_dann, 'batch_start_hook': partial(mtlp.reset_hidden, lm),
-        'clip_grads_at': -1.0, 'lr_schedule': lr_schedule}
+        'clip_grads_at': params.clip_grads_at, 'lr_schedule': lr_schedule}
 
 
 '''
@@ -508,8 +522,8 @@ def generic_loop(epochs: int,
                  epoch_end_hook: Callable = None,
                  batch_start_hook: Callable = None,
                  batch_end_hook: Callable = None,
-                 weight_decay: float = 0.0,
-                 clip_grads_at: float = -1.0,
+                 weight_decay: float = params.weight_decay,
+                 clip_grads_at: float = params.clip_grads_at,
                  lr_schedule=None,
                  eval_fn: Callable = None,
                  eval_aux_fn: Callable = None) -> (list, list, list):
@@ -648,15 +662,16 @@ traces_start = generic_loop(**args)
 
 # Now unfreeze all layers and apply discr
 for grp in opt.param_groups:
-    grp['lr'] = bestlr
+    grp['lr'] = params.bestlr
 
-lr_dscr = lambda opt, lr, fctr=2.6: [lr / (fctr ** i) for i in range(len(opt.param_groups))[::-1]]
-update_lr(opt, lr_dscr(opt, bestlr))
+lr_dscr = lambda opt, lr, fctr=params.lr_dscr: [lr / (fctr ** i) for i in range(len(opt.param_groups))[::-1]]
+update_lr(opt, lr_dscr(opt, params.bestlr))
 
 if DEBUG:
     print([x['lr'] for x in opt.param_groups])
 
-lr_args = {'iterations': len(data_fn(data_a=data_wiki['train'], data_b=data_imdb['train']))*15, 'cut_frac': 0.1, 'ratio': 32}
+lr_args = {'iterations': len(data_fn(data_a=data_wiki['train'], data_b=data_imdb['train']))*15,
+           'cut_frac': params.lr_cutfrac, 'ratio': params.lr_ratio}
 lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.SlantedTriangularLR)
 args['lr_schedule'] = lr_schedule
 args['epochs'] = 15
