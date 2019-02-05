@@ -260,7 +260,7 @@ if DEBUG:
 
 '''
     Now we make vocabulary, select 60k most freq words 
-        (we do this looking only at imdb, and ignore wiki here)
+        **NOTE: NOT ANY MORE**: (we do this looking only at imdb, and ignore wiki here)
 '''
 
 freq = Counter(p for o in trn_tok for p in o)
@@ -272,8 +272,23 @@ itos = [o for o, c in freq.most_common(max_vocab) if c > min_freq]
 itos.insert(0, '_pad_')
 itos.insert(0, '_unk_')
 stoi = collections.defaultdict(lambda: 0, {v: k for k, v in enumerate(itos)})
-vs = len(itos)
 
+# This block here also takes words from wiki while making vocabulary.
+wiki_freq = Counter(p for o in wiki_trn_tok for p in o)
+# freq.most_common(25)
+wiki_max_vocab = params.max_vocab_wiki
+wiki_most_common_words = wiki_freq.sorted()
+
+for word, count in wiki_most_common_words:
+    if len(itos) >= max_vocab + wiki_max_vocab:
+        break
+
+    if word not in stoi.keys():
+        itos.append(word)
+        stoi[word] = len(stoi)
+
+
+vs = len(itos)
 trn_lm = np.array([[stoi[o] for o in p] for p in trn_tok])
 val_lm = np.array([[stoi[o] for o in p] for p in val_tok])
 
