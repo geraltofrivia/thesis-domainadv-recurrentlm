@@ -27,6 +27,9 @@ from mytorch import loops as mtlp
 from mytorch.utils.goodies import *
 from mytorch import lriters as mtlr
 
+import utils
+from options import Options as params
+
 device = torch.device('cuda')
 np.random.seed(42)
 torch.manual_seed(42)
@@ -52,20 +55,6 @@ PRE_PATH = LM_PATH / 'wt103'
 PRE_LM_PATH = PRE_PATH / 'fwd_wt103.h5'
 CLASSES = ['neg', 'pos', 'unsup']
 WIKI_CLASSES = ['wiki.train.tokens', 'wiki.valid.tokens', 'wiki.test.tokens']
-
-
-'''
-    Hyperparams w.r.t. the training of this thing.
-'''
-class params(object):
-    dps = list(np.asarray([0.25, 0.1, 0.2, 0.02, 0.15]) * 0.7)
-    lr_cutfrac = 0.1
-    bestlr = 0.003
-    lr_ratio = 32
-    lr_dscr = 1.3
-    weight_decay = 0.0
-    clip_grads_at = -1.0
-
 
 
 '''
@@ -276,7 +265,7 @@ if DEBUG:
 
 freq = Counter(p for o in trn_tok for p in o)
 # freq.most_common(25)
-max_vocab = 60000
+max_vocab = params.max_vocab_task
 min_freq = 2
 
 itos = [o for o, c in freq.most_common(max_vocab) if c > min_freq]
@@ -299,6 +288,8 @@ if DEBUG:
 
 """
     Now we pull pretrained models from disk
+    
+    TODO: Check this block
 """
 em_sz, nh, nl = 400, 1150, 3
 # PRE_PATH = PATH / 'models' / 'wt103'
@@ -388,7 +379,7 @@ class LanguageModel(nn.Module):
         self.linear_dec = CustomDecoder(
             _encargs['ntoken'],
             n_hid=400,
-            dropout=0.1 * 0.7,
+            dropout=params.decoder_drops,
             tie_encoder=self.encoder.encoder,
             bias=False
         ).to(self.device)
@@ -400,7 +391,7 @@ class LanguageModel(nn.Module):
         #     #             tie_encoder=self.encoder.encoder,
         #     bias=False
         # ).to(self.device)
-        self.linear_dom = CustomLinear(layers=[400*3, 50, 2], drops=[0.2, 0.1]).to(self.device)
+        self.linear_dom = CustomLinear(layers=params.domclas_layers, drops=params.domclas_drops).to(self.device)
         self.encoder.reset()
 
     def forward(self, x):
@@ -431,23 +422,21 @@ class LanguageModel(nn.Module):
 '''
     Hyper parameters
 '''
-wd = 1e-7
 bptt = 70
-bs = 24
-opt_fn = partial(torch.optim.Adam, betas=(0.8, 0.99))  # @TODO: find real optimizer, and params
+bs = params.bs
+opt_fn = partial(torch.optim.Adam, betas=params.adam_betas)  # @TODO: find real optimizer, and params
 
 # Load the pre-trained model
 parameter_dict = {'itos2': itos2}
-dps = params.dps
+dps = params.encoder_drops
 encargs = {'ntoken': new_w.shape[0],
            'emb_sz': 400, 'n_hid': 1150,
            'n_layers': 3, 'pad_token': 0,
            'qrnn': False, 'dropouti': dps[0],
            'wdrop': dps[2], 'dropoute': dps[3], 'dropouth': dps[4]}
 
-# For now, lets assume our best lr = 0.001
-lm = LanguageModel(parameter_dict, device, wgts_enc, wgts_dec, encargs)
-opt = make_opt(lm, opt_fn, lr=params.bestlr)
+lm = LanguageModel(parameter_dict, device, _wgts_e=wgts_enc, _wgts_d=wgts_dec, _encargs=encargs)
+opt = make_opt(lm, opt_fn, lr=params.lr.init)
 loss_main_fn = F.cross_entropy
 loss_aux_fn = F.cross_entropy
 
@@ -460,16 +449,15 @@ data_fn = partial(DomainAgnosticSampler, data_fn=data_fn_unidomain)
 # Set up lr and freeze stuff
 for grp in opt.param_groups:
     grp['lr'] = 0.0
-opt.param_groups[3]['lr'] = params.bestlr
-opt.param_groups[4]['lr'] = params.bestlr
+opt.param_groups[3]['lr'] = params.lr.init
+opt.param_groups[4]['lr'] = params.lr.init
 
 # lr_args = {'batches':, 'cycles': 1}
 lr_args = {'iterations': len(data_fn(data_a=data_wiki['train'], data_b=data_imdb['train'])),
-           'cut_frac': params.lr_cutfrac, 'ratio': params.lr_ratio}
+           'cut_frac': params.lr.sltr_cutfrac, 'ratio': params.lr.sltr_ratio}
 lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.SlantedTriangularLR)
 
 
-# @TODO: add dom agnostic thing to eval as well?
 def _eval(y_pred, y_true):
     """
         Expects a batch of input
@@ -662,16 +650,16 @@ traces_start = generic_loop(**args)
 
 # Now unfreeze all layers and apply discr
 for grp in opt.param_groups:
-    grp['lr'] = params.bestlr
+    grp['lr'] = params.lr.init
 
-lr_dscr = lambda opt, lr, fctr=params.lr_dscr: [lr / (fctr ** i) for i in range(len(opt.param_groups))[::-1]]
-update_lr(opt, lr_dscr(opt, params.bestlr))
+lr_dscr = lambda opt, lr, fctr=params.lr.dscr: [lr / (fctr ** i) for i in range(len(opt.param_groups))[::-1]]
+update_lr(opt, lr_dscr(opt, params.lr.init))
 
 if DEBUG:
     print([x['lr'] for x in opt.param_groups])
 
 lr_args = {'iterations': len(data_fn(data_a=data_wiki['train'], data_b=data_imdb['train']))*15,
-           'cut_frac': params.lr_cutfrac, 'ratio': params.lr_ratio}
+           'cut_frac': params.lr.sltr_cutfrac, 'ratio': params.lr.sltr_ratio}
 lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.SlantedTriangularLR)
 args['lr_schedule'] = lr_schedule
 args['epochs'] = 15
@@ -679,12 +667,11 @@ args['epochs'] = 15
 traces_main = generic_loop(**args)
 traces = [a+b for a, b in zip(traces_start, traces_main)]
 
-# Dumping the traces
-DUMPPATH = PATH / 'dann_trim_default'
-with open(DUMPPATH/'unsup_traces.pkl', 'wb+') as fl:
-    pickle.dump(traces, fl)
 
-# The vocab and the models
-pickle.dump(itos, open(DUMPPATH / 'itos.pkl', 'wb'))
-torch.save(lm.state_dict(), DUMPPATH / 'unsup_model.torch')
-torch.save(lm.encoder.state_dict(), DUMPPATH / 'unsup_model_enc.torch')
+# Dumping stuff
+DUMPPATH = PATH / 'dann_trim_default' if TRIM else PATH / 'dann_full_default'
+save(DUMPPATH,
+     torch_stuff=[tosave('unsup_model.torch', lm.state_dict()), tosave('unsup_model_enc.torch', lm.encoder.state_dict())],
+     pickle_stuff=[tosave('unsup_traces.pkl', traces), tosave('unsup_options.pkl', params)],
+     # json_stuff=[tosave('unsup_summary.json', utils.get_best_from(traces))],
+     _newdir=True)
