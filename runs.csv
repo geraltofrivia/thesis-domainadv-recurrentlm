@@ -9,3 +9,5 @@ lr_dscr = 1.3
 weight_decay = 0.0
 clip_grads_at = -1.0"
 False,0.28292,0.04822,0.52179,0.49255,,,0.94964,0.92782,0.93166,,,,same
+False,0.27767,0.072567,0.51849,0.49491,,,,,,,,,"also taking 10k words from wiki
+"

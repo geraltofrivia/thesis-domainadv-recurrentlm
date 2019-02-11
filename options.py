@@ -14,7 +14,7 @@ class Options:
     max_vocab_task = 60000
     max_vocab_wiki = 0
 
-    domclas_layer = [400*3, 50, 2]
+    domclas_layers = [400*3, 50, 2]
     phase1=True
 
     # Dropouts

@@ -439,7 +439,7 @@ class LanguageModel(nn.Module):
 '''
 bptt = 70
 bs = params.bs
-opt_fn = partial(torch.optim.Adam, betas=params.adam_betas)  # @TODO: find real optimizer, and params
+opt_fn = partial(torch.optim.SGD)  #, betas=params.adam_betas)  # @TODO: find real optimizer, and params
 
 # Load the pre-trained model
 parameter_dict = {'itos2': itos2}
