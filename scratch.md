@@ -16,10 +16,10 @@
 
 Or things which might work out
 
-1. Using words from wiki during phase2
-2. Skipping phase1
-3. Using different optimizer than ADAM (SGD)
-4. Using diff learning rate for dom clf ($lambda$ in paper)
+1. Using words from wiki during phase2 (implmenentation done)
+2. Skipping phase1 (just train from scratch using DNN) (implementation 20min)
+3. Using different optimizer than ADAM (SGD) (implementation 1min)
+4. Using diff learning rate for dom clf ($lambda$ in paper) (implementation 2hr)
 5. Different datasets.
 
 How do i decide when something finally works?
