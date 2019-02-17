@@ -35,7 +35,7 @@ np.random.seed(42)
 torch.manual_seed(42)
 
 DEBUG = True
-TRIM=True
+TRIM=False
 
 # Path fields
 BOS = 'xbos'  # beginning-of-sentence tag
@@ -491,7 +491,7 @@ args = {'epochs': 1, 'weight_decay': params.weight_decay, 'data_a': data_imdb, '
         'device': device, 'opt': opt, 'loss_main_fn': loss_main_fn, 'loss_aux_fn': loss_aux_fn,
         'train_fn': lm, 'train_aux_fn': lm.domain, 'predict_fn': lm.predict, 'data_fn': data_fn, 'model': lm,
         'eval_fn': _eval, 'eval_aux_fn': _eval_dann, 'batch_start_hook': partial(mtlp.reset_hidden, lm),
-        'clip_grads_at': params.clip_grads_at, 'lr_schedule': lr_schedule}
+        'clip_grads_at': params.clip_grads_at, 'lr_schedule': lr_schedule, 'loss_aux_scale': params.loss_scale}
 
 
 '''
@@ -514,6 +514,7 @@ def generic_loop(epochs: int,
                  opt: torch.optim,
                  loss_main_fn: torch.nn,
                  loss_aux_fn: torch.nn,
+                 loss_aux_scale: float,
                  model: torch.nn.Module,
                  train_fn: Callable,
                  train_aux_fn: Callable,
@@ -548,6 +549,7 @@ def generic_loop(epochs: int,
     :param opt: torch optimizer, with proper param_groups for better lr decay per laye
     :param loss_main_fn: torch.nn loss fn for the actual thing
     :param loss_aux_fn: torch.nn loss fn for the domain agnostic thing
+    :param loss_aux_scale: float signifying how much to scale DANN loss with, while combining losses.
     :param model: torch module (for grad clipping)
     :param train_fn: a function which takes x & y, returns loss and y_pred
     :param train_aux_fn: a function which takes x & y, returns loss and y_pred_aux
@@ -605,12 +607,14 @@ def generic_loop(epochs: int,
                 y_pred = op[0]
                 loss = loss_main_fn(y_pred, _y)
 
-                # Pass regular gradients
-                loss.backward(retain_graph=True)
+                # # Pass regular gradients
+                # loss.backward(retain_graph=True)
 
                 # B: Domain agnostic stuff
                 y_pred_aux = train_aux_fn(op[1:])
                 loss_aux = loss_aux_fn(y_pred_aux, _y_aux)
+
+                loss = loss + (loss_aux_scale * loss_aux)
 
                 # Logging
                 per_epoch_tr_acc.append(eval_fn(y_pred=y_pred, y_true=_y).item())
