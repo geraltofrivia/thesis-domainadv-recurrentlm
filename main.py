@@ -567,8 +567,9 @@ def generic_loop(epochs: int,
     :return: traces
     """
 
-    train_loss = []
-    train_acc = []
+    train_loss_main = []
+    train_loss_aux = []
+    train_acc_main = []
     train_acc_aux = []
     val_acc = []
     lrs = []
@@ -576,8 +577,9 @@ def generic_loop(epochs: int,
     # Epoch level
     for e in range(epochs):
 
-        per_epoch_loss = []
-        per_epoch_tr_acc = []
+        per_epoch_loss_main = []
+        per_epoch_loss_aux = []
+        per_epoch_tr_acc_main = []
         per_epoch_tr_acc_aux = []
 
         # Train
@@ -605,24 +607,23 @@ def generic_loop(epochs: int,
                 # A: Normal stuff
                 op = train_fn(_x)
                 y_pred = op[0]
-                loss = loss_main_fn(y_pred, _y)
-
-                # # Pass regular gradients
-                # loss.backward(retain_graph=True)
+                loss_main = loss_main_fn(y_pred, _y)
 
                 # B: Domain agnostic stuff
                 y_pred_aux = train_aux_fn(op[1:])
                 loss_aux = loss_aux_fn(y_pred_aux, _y_aux)
 
-                loss = loss + (loss_aux_scale * loss_aux)
+                # C. Add losses with scale.
+                loss = loss_main + (loss_aux_scale * loss_aux)
 
                 # Logging
-                per_epoch_tr_acc.append(eval_fn(y_pred=y_pred, y_true=_y).item())
+                per_epoch_tr_acc_main.append(eval_fn(y_pred=y_pred, y_true=_y).item())
                 per_epoch_tr_acc_aux.append(eval_aux_fn(y_pred=y_pred_aux, y_true=_y_aux).item())
-                per_epoch_loss.append(loss.item())
+                per_epoch_loss_main.append(loss_main.item())
+                per_epoch_loss_aux.append(loss_aux.item())
 
                 # Pass aux gradients
-                loss_aux.backward(retain_graph=False)
+                loss.backward(retain_graph=False)
 
                 # Optimizer Step
                 if clip_grads_at > 0.0: torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grads_at)
@@ -648,21 +649,28 @@ def generic_loop(epochs: int,
                 per_epoch_vl_acc.append(eval_fn(y_pred, _y).item())
 
         # Bookkeep
-        train_acc.append(np.mean(per_epoch_tr_acc))
+        train_acc_main.append(np.mean(per_epoch_tr_acc_main))
         train_acc_aux.append(np.mean(per_epoch_tr_acc_aux))
-        train_loss.append(np.mean(per_epoch_loss))
+        train_loss_main.append(np.mean(per_epoch_loss_main))
+        train_loss_aux.append(np.mean(per_epoch_loss_main))
         val_acc.append(np.mean(per_epoch_vl_acc))
 
-        print("Epoch: %(epo)03d | Loss: %(loss).5f | Tr_c: %(tracc)0.5f | Tr_aux: %(tracc_aux)0.5f | "
-              "Vl_c: %(vlacc)0.5f | Time: %(time).3f min"
+        print("Epoch: %(epo)03d | "
+              "Loss: %(loss).4f | "
+              "Loss_aux: %(loss_aux).4f | "
+              "Tr_c: %(tracc)0.4f | "
+              "Vl_c: %(vlacc)0.5f | "
+              "Tr_aux: %(tracc_aux)0.4f | "
+              " Time: %(time).3f m"
               % {'epo': e,
-                 'loss': float(np.mean(per_epoch_loss)),
-                 'tracc': float(np.mean(per_epoch_tr_acc)),
+                 'loss': float(np.mean(per_epoch_loss_main)),
+                 'loss_aux': float(np.mean(per_epoch_loss_aux)),
+                 'tracc': float(np.mean(per_epoch_tr_acc_main)),
                  'tracc_aux': float(np.mean(per_epoch_tr_acc_aux)),
                  'vlacc': float(np.mean(per_epoch_vl_acc)),
                  'time': timer.interval / 60.0})
 
-    return train_acc, train_acc_aux, train_loss, val_acc, lrs
+    return train_acc_main, val_acc, train_acc_aux, train_loss_main, train_loss_aux, lrs
 
 
 traces_start = generic_loop(**args)

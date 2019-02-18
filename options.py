@@ -22,5 +22,5 @@ class Options:
     decoder_drops = 0.1 * 0.7
     domclas_drops = [0.2, 0.1]
 
-    bs = 24
+    bs = 20
     loss_scale = 0.5
