@@ -1,12 +1,12 @@
 # External Lib imports
-import collections
-import html
 import os
-import pickle
 import re
-from functools import partial
+import html
+import argparse
+import collections
 from pathlib import Path
 from typing import Callable
+from functools import partial
 
 import pandas as pd
 import sklearn
@@ -27,15 +27,13 @@ from mytorch import loops as mtlp
 from mytorch.utils.goodies import *
 from mytorch import lriters as mtlr
 
+# Local imports
 import utils
 from options import Options as params
 
 device = torch.device('cuda')
 np.random.seed(42)
 torch.manual_seed(42)
-
-DEBUG = True
-TRIM=False
 
 # Path fields
 BOS = 'xbos'  # beginning-of-sentence tag
@@ -60,6 +58,8 @@ WIKI_CLASSES = ['wiki.train.tokens', 'wiki.valid.tokens', 'wiki.test.tokens']
 '''
     Data sampler for this training
 '''
+
+
 class DomainAgnosticSampler:
     """ Sample data for language model training from two different domains in one batch. """
 
@@ -126,8 +126,10 @@ class DomainAgnosticSampler:
 
 
 '''
-    Start making data
+    Data Functions
 '''
+
+
 def get_texts_org(path):
     texts, labels = [], []
     for idx, label in enumerate(CLASSES):
@@ -135,12 +137,6 @@ def get_texts_org(path):
             texts.append(fname.open('r', encoding='utf-8').read())
             labels.append(idx)
     return np.array(texts), np.array(labels)
-
-
-trn_texts, trn_labels = get_texts_org(IMDB_DATA_PATH / 'train')
-val_texts, val_labels = get_texts_org(IMDB_DATA_PATH / 'test')
-col_names = ['labels', 'text']
-print(len(trn_texts), len(val_texts))
 
 
 def is_valid_sent(x):
@@ -158,38 +154,9 @@ def wiki_get_texts_org(path):
     return tuple(texts)
 
 
-wiki_trn_texts, wiki_val_texts, wiki_tst_texts = wiki_get_texts_org(WIKI_DATA_PATH)
-print(len(wiki_trn_texts), len(wiki_val_texts))
-
 '''
-    Crop data
+    Dataframe black magic functions
 '''
-if TRIM:
-    trn_texts, val_texts = trn_texts[:1000], val_texts[:1000]
-    wiki_trn_texts, wiki_val_texts, wiki_tst_texts = wiki_trn_texts[:1000], wiki_val_texts[:1000], wiki_tst_texts[:1000]
-
-'''
-    Shuffle data
-'''
-trn_idx = np.random.permutation(len(trn_texts))
-val_idx = np.random.permutation(len(val_texts))
-
-trn_texts, trn_labels = trn_texts[trn_idx], trn_labels[trn_idx]
-val_texts, val_labels = val_texts[val_idx], val_labels[val_idx]
-
-np.random.shuffle(wiki_trn_texts)
-np.random.shuffle(wiki_val_texts)
-np.random.shuffle(wiki_tst_texts)
-
-wiki_trn_labels = [0 for _ in wiki_trn_texts]
-wiki_val_labels = [0 for _ in wiki_val_texts]
-wiki_tst_labels = [0 for _ in wiki_val_texts]
-
-'''
-    Dataframe black magic
-'''
-chunksize = 24000
-re1 = re.compile(r'  +')
 
 
 def _fixup_(x):
@@ -228,108 +195,11 @@ def get_all(df, n_lbls):
     return tok, labels
 
 
-trn_texts, val_texts = sklearn.model_selection.train_test_split(
-        np.concatenate([trn_texts, val_texts]), test_size=0.1)
-
-if DEBUG:
-    print(len(trn_texts), len(val_texts))
-
-df_trn = pd.DataFrame({'text': trn_texts, 'labels': [0] * len(trn_texts)}, columns=col_names)
-df_val = pd.DataFrame({'text': val_texts, 'labels': [0] * len(val_texts)}, columns=col_names)
-
-trn_tok, trn_labels = _simple_apply_fixup_(df_trn)
-val_tok, val_labels = _simple_apply_fixup_(df_val)
-
-if DEBUG:
-    print(f"Trn: {len(trn_tok), len(trn_labels)}, Val: {len(val_tok), len(val_labels)} ")
-
-wiki_trn_texts, wiki_val_texts = sklearn.model_selection.train_test_split(
-    np.concatenate([wiki_trn_texts, wiki_val_texts, wiki_tst_texts]), test_size=0.1)
-
-if DEBUG:
-    print(len(wiki_trn_texts), len(wiki_val_texts))
-
-wiki_df_trn = pd.DataFrame({'text': wiki_trn_texts, 'labels': [0] * len(wiki_trn_texts)}, columns=col_names)
-wiki_df_val = pd.DataFrame({'text': wiki_val_texts, 'labels': [0] * len(wiki_val_texts)}, columns=col_names)
-
-wiki_trn_tok, wiki_trn_labels = _simple_apply_fixup_(wiki_df_trn)
-wiki_val_tok, wiki_val_labels = _simple_apply_fixup_(wiki_df_val)
-
-if DEBUG:
-    print(f"Trn: {len(wiki_trn_tok), len(wiki_trn_labels)}, Val: {len(wiki_val_tok), len(wiki_val_labels)} ")
-
 '''
-    Now we make vocabulary, select 60k most freq words 
-        **NOTE: NOT ANY MORE**: (we do this looking only at imdb, and ignore wiki here)
+    Model definitions
 '''
 
-freq = Counter(p for o in trn_tok for p in o)
-# freq.most_common(25)
-max_vocab = params.max_vocab_task
-min_freq = 2
 
-itos = [o for o, c in freq.most_common(max_vocab) if c > min_freq]
-itos.insert(0, '_pad_')
-itos.insert(0, '_unk_')
-stoi = collections.defaultdict(lambda: 0, {v: k for k, v in enumerate(itos)})
-
-# This block here also takes words from wiki while making vocabulary.
-wiki_freq = Counter(p for o in wiki_trn_tok for p in o)
-# freq.most_common(25)
-wiki_max_vocab = params.max_vocab_wiki
-wiki_most_common_words = wiki_freq.sorted()
-
-for word, count in wiki_most_common_words:
-    if len(itos) >= max_vocab + wiki_max_vocab:
-        break
-
-    if word not in stoi.keys():
-        itos.append(word)
-        stoi[word] = len(stoi)
-
-
-vs = len(itos)
-trn_lm = np.array([[stoi[o] for o in p] for p in trn_tok])
-val_lm = np.array([[stoi[o] for o in p] for p in val_tok])
-
-if DEBUG:
-    print(f"ITOS: {len(itos)}, STOI: {len(stoi)}")
-
-wiki_trn_lm = np.array([[stoi[o] for o in p] for p in wiki_trn_tok])
-wiki_val_lm = np.array([[stoi[o] for o in p] for p in wiki_val_tok])
-
-if DEBUG:
-    print(f"ITOS: {len(itos)}, STOI: {len(stoi)}")
-
-"""
-    Now we pull pretrained models from disk
-    
-    TODO: Check this block
-"""
-em_sz, nh, nl = 400, 1150, 3
-# PRE_PATH = PATH / 'models' / 'wt103'
-# PRE_LM_PATH = PRE_PATH / 'fwd_wt103.h5'
-wgts = torch.load(PRE_LM_PATH, map_location=lambda storage, loc: storage)
-enc_wgts = core.to_np(wgts['0.encoder.weight'])
-row_m = enc_wgts.mean(0)
-itos2 = pickle.load((PRE_PATH / 'itos_wt103.pkl').open('rb'))
-stoi2 = collections.defaultdict(lambda: -1, {v: k for k, v in enumerate(itos2)})
-new_w = np.zeros((vs, em_sz), dtype=np.float32)
-for i, w in enumerate(itos):
-    r = stoi2[w]
-    new_w[i] = enc_wgts[r] if r >= 0 else row_m
-
-wgts['0.encoder.weight'] = T(new_w)
-wgts['0.encoder_with_dropout.embed.weight'] = T(np.copy(new_w))
-wgts['1.decoder.weight'] = T(np.copy(new_w))
-wgts_enc = {'.'.join(k.split('.')[1:]): val
-            for k, val in wgts.items() if k[0] == '0'}
-wgts_dec = {'.'.join(k.split('.')[1:]): val
-            for k, val in wgts.items() if k[0] == '1'}
-
-'''
-    Define model
-'''
 class CustomEncoder(lm_rnn.RNN_Encoder):
 
     @property
@@ -434,45 +304,6 @@ class LanguageModel(nn.Module):
             return pred
 
 
-'''
-    Hyper parameters
-'''
-bptt = 70
-bs = params.bs
-opt_fn = partial(torch.optim.SGD)  #, betas=params.adam_betas)  # @TODO: find real optimizer, and params
-
-# Load the pre-trained model
-parameter_dict = {'itos2': itos2}
-dps = params.encoder_drops
-encargs = {'ntoken': new_w.shape[0],
-           'emb_sz': 400, 'n_hid': 1150,
-           'n_layers': 3, 'pad_token': 0,
-           'qrnn': False, 'dropouti': dps[0],
-           'wdrop': dps[2], 'dropoute': dps[3], 'dropouth': dps[4]}
-
-lm = LanguageModel(parameter_dict, device, _wgts_e=wgts_enc, _wgts_d=wgts_dec, _encargs=encargs)
-opt = make_opt(lm, opt_fn, lr=params.lr.init)
-loss_main_fn = F.cross_entropy
-loss_aux_fn = F.cross_entropy
-
-# Make data
-data_fn_unidomain = partial(text.LanguageModelLoader, bs=bs, bptt=bptt)
-data_imdb = {'train': np.concatenate(trn_lm), 'valid': np.concatenate(val_lm)}
-data_wiki = {'train': np.concatenate(wiki_trn_lm), 'valid': np.concatenate(wiki_val_lm)}
-data_fn = partial(DomainAgnosticSampler, data_fn=data_fn_unidomain)
-
-# Set up lr and freeze stuff
-for grp in opt.param_groups:
-    grp['lr'] = 0.0
-opt.param_groups[3]['lr'] = params.lr.init
-opt.param_groups[4]['lr'] = params.lr.init
-
-# lr_args = {'batches':, 'cycles': 1}
-lr_args = {'iterations': len(data_fn(data_a=data_wiki['train'], data_b=data_imdb['train'])),
-           'cut_frac': params.lr.sltr_cutfrac, 'ratio': params.lr.sltr_ratio}
-lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.SlantedTriangularLR)
-
-
 def _eval(y_pred, y_true):
     """
         Expects a batch of input
@@ -481,17 +312,6 @@ def _eval(y_pred, y_true):
         :param y_true: tensor of shape (b, 1)
     """
     return torch.mean((torch.argmax(y_pred, dim=1) == y_true).float())
-
-
-def _eval_dann(y_pred, y_true):
-    return torch.mean((torch.argmax(y_pred, dim=1) == y_true).float())
-
-
-args = {'epochs': 1, 'weight_decay': params.weight_decay, 'data_a': data_imdb, 'data_b': data_wiki,
-        'device': device, 'opt': opt, 'loss_main_fn': loss_main_fn, 'loss_aux_fn': loss_aux_fn,
-        'train_fn': lm, 'train_aux_fn': lm.domain, 'predict_fn': lm.predict, 'data_fn': data_fn, 'model': lm,
-        'eval_fn': _eval, 'eval_aux_fn': _eval_dann, 'batch_start_hook': partial(mtlp.reset_hidden, lm),
-        'clip_grads_at': params.clip_grads_at, 'lr_schedule': lr_schedule, 'loss_aux_scale': params.loss_scale}
 
 
 '''
@@ -522,13 +342,16 @@ def generic_loop(epochs: int,
                  data_a: dict,
                  data_b: dict,
                  data_fn: classmethod,
+                 save_params,
+                 save_dir: Path = None,
+                 save_best: bool = False,
                  epoch_start_hook: Callable = None,
                  epoch_end_hook: Callable = None,
                  batch_start_hook: Callable = None,
                  batch_end_hook: Callable = None,
                  weight_decay: float = params.weight_decay,
                  clip_grads_at: float = params.clip_grads_at,
-                 lr_schedule=None,
+                 lr_schedule = None,
                  eval_fn: Callable = None,
                  eval_aux_fn: Callable = None) -> (list, list, list):
     """
@@ -544,7 +367,8 @@ def generic_loop(epochs: int,
         Train_fn must return both loss and y_pred
 
     :param epochs: number of epochs to train for
-    :param data: data dict (structure specified above)
+    :param data_a: data dict (structure specified above) (main)
+    :param data_b: data dict (structure specified above) (aux)
     :param device: torch device to init the tensors with
     :param opt: torch optimizer, with proper param_groups for better lr decay per laye
     :param loss_main_fn: torch.nn loss fn for the actual thing
@@ -561,6 +385,9 @@ def generic_loop(epochs: int,
     :param weight_decay: a L2 ratio (as mentioned in (https://arxiv.org/pdf/1711.05101.pdf)
     :param clip_grads_at: in case you want gradients clipped, send the max val here
     :param lr_schedule: a schedule that is called @ every batch start.
+    :param save_best: bool which wants either doesn't save, or saves at best
+    :param save_dir: Path object to which we save stuff (based on save_best)
+    :param save_params: a dict of all the params used while running and training the model.
     :param data_fn: a class to which we can pass X and Y, and get an iterator.
     :param eval_fn: function which when given pred and true, returns acc
     :param eval_aux_fn: same as eval_fn but for domain classifier's output.
@@ -573,6 +400,8 @@ def generic_loop(epochs: int,
     train_acc_aux = []
     val_acc = []
     lrs = []
+
+    assert (not save_best) or (save_best and save_dir), "No save dir specified."
 
     # Epoch level
     for e in range(epochs):
@@ -670,35 +499,247 @@ def generic_loop(epochs: int,
                  'vlacc': float(np.mean(per_epoch_vl_acc)),
                  'time': timer.interval / 60.0})
 
+        # Save block (flag and condition)
+        if save_best and per_epoch_tr_acc_main[-1] is np.max(per_epoch_tr_acc_main):
+
+            # Adding epoch info along with options
+            save_params.epoch = e
+
+            # Call save function and save
+            mt_save(save_dir,
+                    torch_stuff=[tosave('unsup_model.torch', model.state_dict()),
+                                 tosave('unsup_model_enc.torch', model.encoder.state_dict())],
+                    pickle_stuff=[tosave('unsup_traces.pkl', [train_acc_main, val_acc, train_acc_aux, train_loss_main, train_loss_aux, lrs]),
+                                  tosave('unsup_options.pkl', save_params)],
+                    _newdir=True)
+            print(f"Model saved on Epoch {e} at save_dir")
+
     return train_acc_main, val_acc, train_acc_aux, train_loss_main, train_loss_aux, lrs
 
 
-traces_start = generic_loop(**args)
+if __name__ == '__main__':
 
-# Now unfreeze all layers and apply discr
-for grp in opt.param_groups:
-    grp['lr'] = params.lr.init
+    parser = argparse.ArgumentParser(description='Domain adversarial for ULMFiT\'s language models')
+    
+    TRIM = False
+    DEBUG = False
+    params.trim = TRIM
 
-lr_dscr = lambda opt, lr, fctr=params.lr.dscr: [lr / (fctr ** i) for i in range(len(opt.param_groups))[::-1]]
-update_lr(opt, lr_dscr(opt, params.lr.init))
+    '''
+        Start making data
+    '''
+    trn_texts, trn_labels = get_texts_org(IMDB_DATA_PATH / 'train')
+    val_texts, val_labels = get_texts_org(IMDB_DATA_PATH / 'test')
+    col_names = ['labels', 'text']
+    print(len(trn_texts), len(val_texts))
 
-if DEBUG:
-    print([x['lr'] for x in opt.param_groups])
+    wiki_trn_texts, wiki_val_texts, wiki_tst_texts = wiki_get_texts_org(WIKI_DATA_PATH)
+    print(len(wiki_trn_texts), len(wiki_val_texts))
 
-lr_args = {'iterations': len(data_fn(data_a=data_wiki['train'], data_b=data_imdb['train']))*15,
-           'cut_frac': params.lr.sltr_cutfrac, 'ratio': params.lr.sltr_ratio}
-lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.SlantedTriangularLR)
-args['lr_schedule'] = lr_schedule
-args['epochs'] = 15
+    '''
+        Crop data
+    '''
+    if params.trim:
+        trn_texts, val_texts = trn_texts[:1000], val_texts[:1000]
+        wiki_trn_texts, wiki_val_texts, wiki_tst_texts = wiki_trn_texts[:1000], wiki_val_texts[:1000], wiki_tst_texts[:1000]
 
-traces_main = generic_loop(**args)
-traces = [a+b for a, b in zip(traces_start, traces_main)]
+    '''
+        Shuffle data
+    '''
+    trn_idx = np.random.permutation(len(trn_texts))
+    val_idx = np.random.permutation(len(val_texts))
 
+    trn_texts, trn_labels = trn_texts[trn_idx], trn_labels[trn_idx]
+    val_texts, val_labels = val_texts[val_idx], val_labels[val_idx]
 
-# Dumping stuff
-DUMPPATH = PATH / 'dann_trim_default' if TRIM else PATH / 'dann_full_default'
-save(DUMPPATH,
-     torch_stuff=[tosave('unsup_model.torch', lm.state_dict()), tosave('unsup_model_enc.torch', lm.encoder.state_dict())],
-     pickle_stuff=[tosave('unsup_traces.pkl', traces), tosave('unsup_options.pkl', params)],
-     # json_stuff=[tosave('unsup_summary.json', utils.get_best_from(traces))],
-     _newdir=True)
+    np.random.shuffle(wiki_trn_texts)
+    np.random.shuffle(wiki_val_texts)
+    np.random.shuffle(wiki_tst_texts)
+
+    wiki_trn_labels = [0 for _ in wiki_trn_texts]
+    wiki_val_labels = [0 for _ in wiki_val_texts]
+    wiki_tst_labels = [0 for _ in wiki_val_texts]
+
+    '''
+        Dataframe black magic
+    '''
+    chunksize = 24000
+    re1 = re.compile(r'  +')
+
+    trn_texts, val_texts = sklearn.model_selection.train_test_split(
+        np.concatenate([trn_texts, val_texts]), test_size=0.1)
+
+    if DEBUG:
+        print(len(trn_texts), len(val_texts))
+
+    df_trn = pd.DataFrame({'text': trn_texts, 'labels': [0] * len(trn_texts)}, columns=col_names)
+    df_val = pd.DataFrame({'text': val_texts, 'labels': [0] * len(val_texts)}, columns=col_names)
+
+    trn_tok, trn_labels = _simple_apply_fixup_(df_trn)
+    val_tok, val_labels = _simple_apply_fixup_(df_val)
+
+    if DEBUG:
+        print(f"Trn: {len(trn_tok), len(trn_labels)}, Val: {len(val_tok), len(val_labels)} ")
+
+    wiki_trn_texts, wiki_val_texts = sklearn.model_selection.train_test_split(
+        np.concatenate([wiki_trn_texts, wiki_val_texts, wiki_tst_texts]), test_size=0.1)
+
+    if DEBUG:
+        print(len(wiki_trn_texts), len(wiki_val_texts))
+
+    wiki_df_trn = pd.DataFrame({'text': wiki_trn_texts, 'labels': [0] * len(wiki_trn_texts)}, columns=col_names)
+    wiki_df_val = pd.DataFrame({'text': wiki_val_texts, 'labels': [0] * len(wiki_val_texts)}, columns=col_names)
+
+    wiki_trn_tok, wiki_trn_labels = _simple_apply_fixup_(wiki_df_trn)
+    wiki_val_tok, wiki_val_labels = _simple_apply_fixup_(wiki_df_val)
+
+    if DEBUG:
+        print(f"Trn: {len(wiki_trn_tok), len(wiki_trn_labels)}, Val: {len(wiki_val_tok), len(wiki_val_labels)} ")
+
+    '''
+        Now we make vocabulary, select 60k most freq words 
+            **NOTE: NOT ANY MORE**: (we do this looking only at imdb, and ignore wiki here)
+    '''
+
+    freq = Counter(p for o in trn_tok for p in o)
+    # freq.most_common(25)
+    max_vocab = params.max_vocab_task
+    min_freq = 2
+
+    itos = [o for o, c in freq.most_common(max_vocab) if c > min_freq]
+    itos.insert(0, '_pad_')
+    itos.insert(0, '_unk_')
+    stoi = collections.defaultdict(lambda: 0, {v: k for k, v in enumerate(itos)})
+
+    # This block here also takes words from wiki while making vocabulary.
+    wiki_freq = Counter(p for o in wiki_trn_tok for p in o)
+    # freq.most_common(25)
+    wiki_max_vocab = params.max_vocab_wiki
+    wiki_most_common_words = wiki_freq.sorted()
+
+    for word, count in wiki_most_common_words:
+        if len(itos) >= max_vocab + wiki_max_vocab:
+            break
+
+        if word not in stoi.keys():
+            itos.append(word)
+            stoi[word] = len(stoi)
+
+    vs = len(itos)
+    trn_lm = np.array([[stoi[o] for o in p] for p in trn_tok])
+    val_lm = np.array([[stoi[o] for o in p] for p in val_tok])
+
+    if DEBUG:
+        print(f"ITOS: {len(itos)}, STOI: {len(stoi)}")
+
+    wiki_trn_lm = np.array([[stoi[o] for o in p] for p in wiki_trn_tok])
+    wiki_val_lm = np.array([[stoi[o] for o in p] for p in wiki_val_tok])
+
+    if DEBUG:
+        print(f"ITOS: {len(itos)}, STOI: {len(stoi)}")
+
+    """
+        Now we pull pretrained models from disk
+
+        TODO: Check this block
+    """
+    em_sz, nh, nl = 400, 1150, 3
+    # PRE_PATH = PATH / 'models' / 'wt103'
+    # PRE_LM_PATH = PRE_PATH / 'fwd_wt103.h5'
+    wgts = torch.load(PRE_LM_PATH, map_location=lambda storage, loc: storage)
+    enc_wgts = core.to_np(wgts['0.encoder.weight'])
+    row_m = enc_wgts.mean(0)
+    itos2 = pickle.load((PRE_PATH / 'itos_wt103.pkl').open('rb'))
+    stoi2 = collections.defaultdict(lambda: -1, {v: k for k, v in enumerate(itos2)})
+    new_w = np.zeros((vs, em_sz), dtype=np.float32)
+    for i, w in enumerate(itos):
+        r = stoi2[w]
+        new_w[i] = enc_wgts[r] if r >= 0 else row_m
+
+    wgts['0.encoder.weight'] = T(new_w)
+    wgts['0.encoder_with_dropout.embed.weight'] = T(np.copy(new_w))
+    wgts['1.decoder.weight'] = T(np.copy(new_w))
+    wgts_enc = {'.'.join(k.split('.')[1:]): val
+                for k, val in wgts.items() if k[0] == '0'}
+    wgts_dec = {'.'.join(k.split('.')[1:]): val
+                for k, val in wgts.items() if k[0] == '1'}
+
+    '''
+        Setting up things for training.
+    '''
+    bptt = 70
+    bs = params.bs
+    opt_fn = partial(torch.optim.SGD)  # , betas=params.adam_betas)  # @TODO: find real optimizer, and params
+
+    # Load the pre-trained model
+    parameter_dict = {'itos2': itos2}
+    dps = params.encoder_drops
+    encargs = {'ntoken': new_w.shape[0],
+               'emb_sz': 400, 'n_hid': 1150,
+               'n_layers': 3, 'pad_token': 0,
+               'qrnn': False, 'dropouti': dps[0],
+               'wdrop': dps[2], 'dropoute': dps[3], 'dropouth': dps[4]}
+
+    lm = LanguageModel(parameter_dict, device, _wgts_e=wgts_enc, _wgts_d=wgts_dec, _encargs=encargs)
+    opt = make_opt(lm, opt_fn, lr=params.lr.init)
+    loss_main_fn = F.cross_entropy
+    loss_aux_fn = F.cross_entropy
+
+    # Make data
+    data_fn_unidomain = partial(text.LanguageModelLoader, bs=bs, bptt=bptt)
+    data_imdb = {'train': np.concatenate(trn_lm), 'valid': np.concatenate(val_lm)}
+    data_wiki = {'train': np.concatenate(wiki_trn_lm), 'valid': np.concatenate(wiki_val_lm)}
+    data_fn = partial(DomainAgnosticSampler, data_fn=data_fn_unidomain)
+
+    # Set up lr and freeze stuff
+    for grp in opt.param_groups:
+        grp['lr'] = 0.0
+    opt.param_groups[3]['lr'] = params.lr.init
+    opt.param_groups[4]['lr'] = params.lr.init
+
+    # lr_args = {'batches':, 'cycles': 1}
+    lr_args = {'iterations': len(data_fn(data_a=data_wiki['train'], data_b=data_imdb['train'])),
+               'cut_frac': params.lr.sltr_cutfrac, 'ratio': params.lr.sltr_ratio}
+    lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.SlantedTriangularLR)
+
+    # Find places to save model
+    save_dir = mt_save_dir(PATH / 'dann', _newdir=True)
+
+    args = {'epochs': 1, 'weight_decay': params.weight_decay, 'data_a': data_imdb, 'data_b': data_wiki,
+            'device': device, 'opt': opt, 'loss_main_fn': loss_main_fn, 'loss_aux_fn': loss_aux_fn,
+            'train_fn': lm, 'train_aux_fn': lm.domain, 'predict_fn': lm.predict, 'data_fn': data_fn, 'model': lm,
+            'eval_fn': _eval, 'eval_aux_fn': _eval, 'batch_start_hook': partial(mtlp.reset_hidden, lm),
+            'clip_grads_at': params.clip_grads_at, 'lr_schedule': lr_schedule, 'loss_aux_scale': params.loss_scale,
+            'save_dir': save_dir, 'save_best': True, 'save_params': params}
+
+    '''
+        Actual training
+    '''
+    # print("Time taken to get everything so far done")
+    traces_start = generic_loop(**args)
+
+    # Now unfreeze all layers and apply discr
+    for grp in opt.param_groups:
+        grp['lr'] = params.lr.init
+
+    lr_dscr = lambda opt, lr, fctr=params.lr.dscr: [lr / (fctr ** i) for i in range(len(opt.param_groups))[::-1]]
+    update_lr(opt, lr_dscr(opt, params.lr.init))
+
+    if DEBUG:
+        print([x['lr'] for x in opt.param_groups])
+
+    lr_args = {'iterations': len(data_fn(data_a=data_wiki['train'], data_b=data_imdb['train'])) * 15,
+               'cut_frac': params.lr.sltr_cutfrac, 'ratio': params.lr.sltr_ratio}
+    lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.SlantedTriangularLR)
+    args['lr_schedule'] = lr_schedule
+    args['epochs'] = 15
+
+    traces_main = generic_loop(**args)
+    traces = [a + b for a, b in zip(traces_start, traces_main)]
+
+    # Final save, just in case
+    # Dumping stuff
+    mt_save(save_dir,
+            pickle_stuff=[tosave('final_unsup_traces.pkl', traces), tosave('unsup_options.pkl', params)],
+            _newdir=True)
+
