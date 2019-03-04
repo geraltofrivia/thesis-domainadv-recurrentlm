@@ -29,9 +29,12 @@ from mytorch import lriters as mtlr
 
 # Local imports
 import utils
-from options import Options as params
+from options import Phase2 as params
 
-device = torch.device('cuda')
+DEVICE = 'cuda:0'
+
+
+device = torch.device(DEVICE)
 np.random.seed(42)
 torch.manual_seed(42)
 
@@ -520,9 +523,10 @@ def generic_loop(epochs: int,
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Domain adversarial for ULMFiT\'s language models')
-    
-    TRIM = False
-    DEBUG = False
+    parser.add_argument("-t", "--trim", type=bool, required=False, help="True if you want to only train on first 1000 train,test samples")
+    parser.add_argument("-d", "--debug", type=bool, required=False, help="True if you want a verbose run")
+    parse_args = vars(parser.parse_args())
+    TRIM, DEBUG = parse_args['trim'], parse_args['debug']
     params.trim = TRIM
 
     '''
@@ -640,7 +644,7 @@ if __name__ == '__main__':
 
     """
         Now we pull pretrained models from disk
-
+    
         TODO: Check this block
     """
     em_sz, nh, nl = 400, 1150, 3
@@ -703,7 +707,11 @@ if __name__ == '__main__':
     lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.SlantedTriangularLR)
 
     # Find places to save model
-    save_dir = mt_save_dir(PATH / 'dann', _newdir=True)
+    save_dir = mt_save_dir(PATH / 'models', _newdir=True)
+
+    # Start to put permanent things there, like the itos
+    mt_save(save_dir,
+            pickle_stuff=[tosave('itos.pkl', itos)])
 
     args = {'epochs': 1, 'weight_decay': params.weight_decay, 'data_a': data_imdb, 'data_b': data_wiki,
             'device': device, 'opt': opt, 'loss_main_fn': loss_main_fn, 'loss_aux_fn': loss_aux_fn,
@@ -740,6 +748,5 @@ if __name__ == '__main__':
     # Final save, just in case
     # Dumping stuff
     mt_save(save_dir,
-            pickle_stuff=[tosave('final_unsup_traces.pkl', traces), tosave('unsup_options.pkl', params)],
-            _newdir=True)
+            pickle_stuff=[tosave('final_unsup_traces.pkl', traces), tosave('unsup_options.pkl', params)])
 

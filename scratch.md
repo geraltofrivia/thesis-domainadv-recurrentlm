@@ -48,4 +48,8 @@ What's happening? No clue!~~ [FIXED: Was a bug in code.]
 
 ### 4th March
 So we ran the code with $l\ambda$ = 0.5 and 1.0 and we get same results.
-Our code does look like we reverse grads
+Our code does look like we reverse grads. **It should, we checked the testbench**
+
+**Conclusion: Both ways (new implementation and old) are equal. Thus probably correct.**
+
+ 

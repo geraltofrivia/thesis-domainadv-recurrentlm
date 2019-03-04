@@ -5,15 +5,15 @@
     @TODO: Check if LR is reset after its fucked up by sltr
 """
 
-import html
-import os
-import pickle
 # External Lib imports
+import os
 import re
-from functools import partial
-from pathlib import Path
-
+import html
+import pickle
+import argparse
 import pandas as pd
+from pathlib import Path
+from functools import partial
 
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 
@@ -28,6 +28,9 @@ import torch.optim as optim
 from mytorch import loops, lriters as mtlr, dataiters as mtdi
 from mytorch.utils.goodies import *
 
+# Local imports
+from options import Phase3 as params
+
 device = torch.device('cuda')
 np.random.seed(42)
 torch.manual_seed(42)
@@ -35,11 +38,6 @@ torch.manual_seed(42)
 '''
     Paths and macros
 '''
-
-DEBUG = True
-DANN = True
-TRIM = True
-
 # Path fields
 BOS = 'xbos'  # beginning-of-sentence tag
 FLD = 'xfld'  # data field tag
@@ -55,10 +53,6 @@ LM_PATH.mkdir(exist_ok=True)
 PRE_PATH = LM_PATH / 'wt103'
 PRE_LM_PATH = PRE_PATH / 'fwd_wt103.h5'
 CLASSES = ['neg', 'pos', 'unsup']
-
-src = 'dann' if DANN else 'phase2'
-datasize = 'trim' if TRIM else 'full'
-DUMPPATH = PATH / f'{src}_{datasize}_default'
 
 
 '''
@@ -167,67 +161,6 @@ def get_texts_org(path):
             labels.append(idx)
     return np.array(texts), np.array(labels)
 
-trn_texts, trn_labels = get_texts_org(DATA_PATH / 'train')
-val_texts, val_labels = get_texts_org(DATA_PATH / 'test')
-
-# Lose label 2 from train
-trn_texts = trn_texts[trn_labels<2]
-trn_labels = trn_labels[trn_labels<2]
-
-# Shuffle data
-if TRIM:
-    np.random.seed(42)
-    trn_idx = np.random.permutation(len(trn_texts))[:1000]
-    val_idx = np.random.permutation(len(val_texts))[:1000]
-else:
-    np.random.seed(42)
-    trn_idx = np.random.permutation(len(trn_texts))
-    val_idx = np.random.permutation(len(val_texts))
-
-trn_texts, trn_labels = trn_texts[trn_idx], trn_labels[trn_idx]
-val_texts, val_labels = val_texts[val_idx], val_labels[val_idx]
-col_names = ['labels', 'text']
-
-df_trn = pd.DataFrame({'text': trn_texts, 'labels': trn_labels}, columns=col_names)
-df_val = pd.DataFrame({'text': val_texts, 'labels': val_labels}, columns=col_names)
-
-itos_path = DUMPPATH / 'itos.pkl'
-itos2 = pickle.load(itos_path.open('rb'))
-stoi2 = {v: k for k, v in enumerate(itos2)}
-
-trn_clas, trn_labels = get_all(df_trn, 1)
-val_clas, val_labels = get_all(df_val, 1)
-
-trn_clas = np.array([[stoi2.get(w, 0) for w in para] for para in trn_clas])
-val_clas = np.array([[stoi2.get(w, 0) for w in para] for para in val_clas])
-trn_labels = [x for y in trn_labels for x in y]
-val_labels = [x for y in val_labels for x in y]
-
-'''
-    Make model
-'''
-dps = list(np.asarray([0.4, 0.5, 0.05, 0.3, 0.4]) * 0.5)
-# enc_wgts = torch.load(LM_PATH, map_location=lambda storage, loc: storage)
-enc_wgts = torch.load(DUMPPATH / 'unsup_model_enc.torch', map_location=lambda storage, loc: storage)
-clf = TextClassifier(device, len(itos2), dps, enc_wgts)
-
-'''
-    Setup things for training (data, loss, opt, lr schedule etc
-'''
-bs = 24
-loss_fn = torch.nn.CrossEntropyLoss()
-opt_fn = partial(optim.Adam, betas=(0.7, 0.99))
-opt = make_opt(clf, opt_fn, lr=0.0)
-opt.param_groups[-1]['lr'] = 0.01
-
-# Make data
-data_fn = partial(mtdi.SortishSampler, _batchsize=bs, _padidx=1)
-data = {'train': {'x': trn_clas, 'y': trn_labels}, 'valid': {'x': val_clas, 'y': val_labels}}
-
-# Make lr scheduler
-lr_args = {'iterations': len(data_fn(data['train'])), 'cycles': 1}
-lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
-
 
 def epoch_end_hook() -> None:
     lr_schedule.reset()
@@ -243,72 +176,143 @@ def eval(y_pred, y_true):
     return torch.mean((torch.argmax(y_pred, dim=1) == y_true).float())
 
 
-args = {'epochs': 1, 'data': data, 'device': device,
-        'opt': opt, 'loss_fn': loss_fn, 'model': clf,
-        'train_fn': clf, 'predict_fn': clf.predict,
-        'epoch_end_hook': epoch_end_hook, 'weight_decay': 1e-7,
-        'clip_grads_at': 0.30, 'lr_schedule': lr_schedule,
-        'data_fn': data_fn, 'eval_fn': eval}
+if __name__ == "__main__":
 
-'''
-    Training schedule:
-    
-    1. Unfreeze one layer. Train for 1 epoch
-    2 - 5. Unfreeze one layer, train for 1 epoch
-    3. Train for 15 epochs (after all layers are unfrozen). Use 15 cycles for cosine annealing.
-'''
-# opt.param_groups[-1]['lr'] = 0.01
-traces = loops.generic_loop(**args)
+    # Get args from console
+    ap = argparse.ArgumentParser()
+    ap.add_argument("-t", "--trim", type=bool, required=False, help="True if you want to only train on first 1000 train,test samples")
+    ap.add_argument("-d", "--debug", type=bool, required=False, help="True if you want a verbose run")
+    ap.add_argument("-md", "--modeldir", required=True,
+                    help="Need to provide the folder name (not the entire dir) to the desired phase 2 model. "
+                         "E.g. `--modeldir 2` shall suffice.")
+    args = vars(ap.parse_args())
+    TRIM, DEBUG, MODEL_NUM = args['trim'], args['debug'], args['modeldir']
+    UNSUP_MODEL_DIR = PATH / 'models' / MODEL_NUM
 
-opt.param_groups[-1]['lr'] = 0.01
-opt.param_groups[-2]['lr'] = 0.005
-lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
-args['lr_schedule'] = lr_schedule
-traces_new = loops.generic_loop(**args)
-traces = [a+b for a, b in zip(traces, traces_new)]
+    trn_texts, trn_labels = get_texts_org(DATA_PATH / 'train')
+    val_texts, val_labels = get_texts_org(DATA_PATH / 'test')
 
-opt.param_groups[-1]['lr'] = 0.01
-opt.param_groups[-2]['lr'] = 0.005
-opt.param_groups[-3]['lr'] = 0.001
-lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
-args['lr_schedule'] = lr_schedule
-traces_new = loops.generic_loop(**args)
-traces = [a+b for a, b in zip(traces, traces_new)]
+    # Lose label 2 from train
+    trn_texts = trn_texts[trn_labels<2]
+    trn_labels = trn_labels[trn_labels<2]
 
-opt.param_groups[-1]['lr'] = 0.01
-opt.param_groups[-2]['lr'] = 0.005
-opt.param_groups[-3]['lr'] = 0.001
-opt.param_groups[-4]['lr'] = 0.001
-lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
-args['lr_schedule'] = lr_schedule
-traces_new = loops.generic_loop(**args)
-traces = [a+b for a, b in zip(traces, traces_new)]
+    # Shuffle data
+    if TRIM:
+        np.random.seed(42)
+        trn_idx = np.random.permutation(len(trn_texts))[:1000]
+        val_idx = np.random.permutation(len(val_texts))[:1000]
+    else:
+        np.random.seed(42)
+        trn_idx = np.random.permutation(len(trn_texts))
+        val_idx = np.random.permutation(len(val_texts))
 
-opt.param_groups[-1]['lr'] = 0.01
-opt.param_groups[-2]['lr'] = 0.005
-opt.param_groups[-3]['lr'] = 0.001
-opt.param_groups[-4]['lr'] = 0.001
-opt.param_groups[-5]['lr'] = 0.001
-lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
-args['lr_schedule'] = lr_schedule
-traces_new = loops.generic_loop(**args)
-traces = [a+b for a, b in zip(traces, traces_new)]
+    trn_texts, trn_labels = trn_texts[trn_idx], trn_labels[trn_idx]
+    val_texts, val_labels = val_texts[val_idx], val_labels[val_idx]
+    col_names = ['labels', 'text']
 
-opt.param_groups[-1]['lr'] = 0.01
-opt.param_groups[-2]['lr'] = 0.005
-opt.param_groups[-3]['lr'] = 0.001
-opt.param_groups[-4]['lr'] = 0.001
-opt.param_groups[-5]['lr'] = 0.001
-lr_args['cycles'] = 15
-args['epochs'] = 15
-lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
-args['lr_schedule'] = lr_schedule
-traces_new = loops.generic_loop(**args)
-traces = [a+b for a, b in zip(traces, traces_new)]
+    df_trn = pd.DataFrame({'text': trn_texts, 'labels': trn_labels}, columns=col_names)
+    df_val = pd.DataFrame({'text': val_texts, 'labels': val_labels}, columns=col_names)
 
-# Dumping the traces
-with open(DUMPPATH/'sup_traces.pkl', 'wb+') as fl:
-    pickle.dump(traces, fl)
+    itos_path = UNSUP_MODEL_DIR / 'itos.pkl'
+    itos2 = pickle.load(itos_path.open('rb'))
+    stoi2 = {v: k for k, v in enumerate(itos2)}
 
-# Dumping the model
-torch.save(clf.state_dict(), DUMPPATH / 'sup_model.torch')
+    trn_clas, trn_labels = get_all(df_trn, 1)
+    val_clas, val_labels = get_all(df_val, 1)
+
+    trn_clas = np.array([[stoi2.get(w, 0) for w in para] for para in trn_clas])
+    val_clas = np.array([[stoi2.get(w, 0) for w in para] for para in val_clas])
+    trn_labels = [x for y in trn_labels for x in y]
+    val_labels = [x for y in val_labels for x in y]
+
+    '''
+        Make model
+    '''
+    dps = list(params.encoder_dropouts)
+    # enc_wgts = torch.load(LM_PATH, map_location=lambda storage, loc: storage)
+    enc_wgts = torch.load(UNSUP_MODEL_DIR / 'unsup_model_enc.torch', map_location=lambda storage, loc: storage)
+    clf = TextClassifier(device, len(itos2), dps, enc_wgts)
+
+    '''
+        Setup things for training (data, loss, opt, lr schedule etc
+    '''
+    bs = params.bs
+    loss_fn = torch.nn.CrossEntropyLoss()
+    opt_fn = partial(optim.Adam, betas=params.adam_betas)
+    opt = make_opt(clf, opt_fn, lr=0.0)
+    opt.param_groups[-1]['lr'] = 0.01
+
+    # Make data
+    data_fn = partial(mtdi.SortishSampler, _batchsize=bs, _padidx=1)
+    data = {'train': {'x': trn_clas, 'y': trn_labels}, 'valid': {'x': val_clas, 'y': val_labels}}
+
+    # Make lr scheduler
+    lr_args = {'iterations': len(data_fn(data['train'])), 'cycles': 1}
+    lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
+
+    args = {'epochs': 1, 'data': data, 'device': device,
+            'opt': opt, 'loss_fn': loss_fn, 'model': clf,
+            'train_fn': clf, 'predict_fn': clf.predict,
+            'epoch_end_hook': epoch_end_hook, 'weight_decay': params.weight_decay,
+            'clip_grads_at': params.clip_grads_at, 'lr_schedule': lr_schedule,
+            'data_fn': data_fn, 'eval_fn': eval}
+
+    '''
+        Training schedule:
+        
+        1. Unfreeze one layer. Train for 1 epoch
+        2 - 5. Unfreeze one layer, train for 1 epoch
+        3. Train for 15 epochs (after all layers are unfrozen). Use 15 cycles for cosine annealing.
+    '''
+    # opt.param_groups[-1]['lr'] = 0.01
+    traces = loops.generic_loop(**args)
+
+    opt.param_groups[-1]['lr'] = 0.01
+    opt.param_groups[-2]['lr'] = 0.005
+    lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
+    args['lr_schedule'] = lr_schedule
+    traces_new = loops.generic_loop(**args)
+    traces = [a+b for a, b in zip(traces, traces_new)]
+
+    opt.param_groups[-1]['lr'] = 0.01
+    opt.param_groups[-2]['lr'] = 0.005
+    opt.param_groups[-3]['lr'] = 0.001
+    lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
+    args['lr_schedule'] = lr_schedule
+    traces_new = loops.generic_loop(**args)
+    traces = [a+b for a, b in zip(traces, traces_new)]
+
+    opt.param_groups[-1]['lr'] = 0.01
+    opt.param_groups[-2]['lr'] = 0.005
+    opt.param_groups[-3]['lr'] = 0.001
+    opt.param_groups[-4]['lr'] = 0.001
+    lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
+    args['lr_schedule'] = lr_schedule
+    traces_new = loops.generic_loop(**args)
+    traces = [a+b for a, b in zip(traces, traces_new)]
+
+    opt.param_groups[-1]['lr'] = 0.01
+    opt.param_groups[-2]['lr'] = 0.005
+    opt.param_groups[-3]['lr'] = 0.001
+    opt.param_groups[-4]['lr'] = 0.001
+    opt.param_groups[-5]['lr'] = 0.001
+    lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
+    args['lr_schedule'] = lr_schedule
+    traces_new = loops.generic_loop(**args)
+    traces = [a+b for a, b in zip(traces, traces_new)]
+
+    opt.param_groups[-1]['lr'] = 0.01
+    opt.param_groups[-2]['lr'] = 0.005
+    opt.param_groups[-3]['lr'] = 0.001
+    opt.param_groups[-4]['lr'] = 0.001
+    opt.param_groups[-5]['lr'] = 0.001
+    lr_args['cycles'] = 15
+    args['epochs'] = 15
+    lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
+    args['lr_schedule'] = lr_schedule
+    traces_new = loops.generic_loop(**args)
+    traces = [a+b for a, b in zip(traces, traces_new)]
+
+    mt_save(UNSUP_MODEL_DIR,
+            torch_stuff=[tosave('sup_model.torch', clf.state_dict())],
+            pickle_stuff=[tosave('final_sup_traces.pkl', traces), tosave('unsup_options.pkl', params)])
