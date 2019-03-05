@@ -1,14 +1,14 @@
 # External Lib imports
-import collections
-import html
-import os
-import pickle
 import re
-from functools import partial
-from pathlib import Path
-
-import pandas as pd
+import os
+import html
+import pickle
 import sklearn
+import argparse
+import collections
+import pandas as pd
+from pathlib import Path
+from functools import partial
 
 os.environ['QT_QPA_PLATFORM']='offscreen'
 
@@ -23,6 +23,9 @@ import torch.nn.functional as F
 # Mytorch imports
 from mytorch import loops, lriters as mtlr
 from mytorch.utils.goodies import *
+
+# Local imports
+from options import Phase2 as params
 
 device = torch.device('cuda')
 np.random.seed(42)
@@ -114,8 +117,6 @@ def eval(y_pred, y_true):
     return torch.mean((torch.argmax(y_pred, dim=1) == y_true).float())
 
 
-DEBUG = True
-
 # Path fields
 BOS = 'xbos'  # beginning-of-sentence tag
 FLD = 'xfld'  # data field tag
@@ -131,7 +132,6 @@ LM_PATH.mkdir(exist_ok=True)
 PRE_PATH = LM_PATH / 'wt103'
 PRE_LM_PATH = PRE_PATH / 'fwd_wt103.h5'
 CLASSES = ['neg', 'pos', 'unsup']
-TRIM = False    # Macro which aggressively crops the data.
 
 
 def get_texts_org(path):
@@ -172,6 +172,14 @@ def get_all(df, n_lbls):
 
 
 if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser(description='Vanilla Phase 2 for ULMFiT\'s language models')
+    parser.add_argument("-t", "--trim", type=bool, required=False,
+                        help="True if you want to only train on first 1000 train,test samples")
+    parser.add_argument("-d", "--debug", type=bool, required=False, help="True if you want a verbose run")
+    parse_args = vars(parser.parse_args())
+    TRIM, DEBUG = parse_args['trim'], parse_args['debug']
+    params.trim = TRIM
 
     trn_texts, trn_labels = get_texts_org(DATA_PATH / 'train')
     val_texts, val_labels = get_texts_org(DATA_PATH / 'test')
@@ -249,7 +257,7 @@ if __name__ == "__main__":
 
     freq = Counter(p for o in tok_trn for p in o)
     # freq.most_common(25)
-    max_vocab = 60000
+    max_vocab = params.max_vocab_task
     min_freq = 2
 
     itos = [o for o, c in freq.most_common(max_vocab) if c > min_freq]
@@ -299,22 +307,20 @@ if __name__ == "__main__":
 
     wd = 1e-7
     bptt = 70
-    bs = 24
-    opt_fn = partial(torch.optim.Adam, betas=(0.8, 0.99))  # @TODO: find real optimizer, and params
+    bs = params.bs
+    opt_fn = partial(torch.optim.Adam, betas=params.adam_betas)  # @TODO: find real optimizer, and params
 
     # Load the pre-trained model
     parameter_dict = {'itos2': itos2}
-    dps = list(np.asarray([0.25, 0.1, 0.2, 0.02, 0.15]) * 0.7)
+    dps = params.encoder_drops
     encargs = {'ntoken': new_w.shape[0],
                'emb_sz': 400, 'n_hid': 1150,
                'n_layers': 3, 'pad_token': 0,
                'qrnn': False, 'dropouti': dps[0],
                'wdrop': dps[2], 'dropoute': dps[3], 'dropouth': dps[4]}
 
-    # For now, lets assume our best lr = 0.001
-    bestlr = 0.001
     lm = LanguageModel(parameter_dict, device, wgts_enc, wgts_dec, encargs)
-    opt = make_opt(lm, opt_fn, lr=bestlr)
+    opt = make_opt(lm, opt_fn, lr=params.lr.init)
 
     data_fn = partial(text.LanguageModelLoader, bs=bs, bptt=bptt)
     data = {'train': np.concatenate(trn_lm), 'valid': np.concatenate(val_lm)}
@@ -328,30 +334,37 @@ if __name__ == "__main__":
     '''
     for grp in opt.param_groups:
         grp['lr'] = 0.0
-    opt.param_groups[0]['lr'] = 1e-3 / 2
+    opt.param_groups[0]['lr'] = params.lr.init
 
     # lr_args = {'batches':, 'cycles': 1}
-    lr_args = {'iterations': len(data_fn(data['train']))*1, 'cut_frac': 0.1, 'ratio': 32}
+    lr_args = {'iterations': len(data_fn(data['train']))*1, 'cut_frac': params.lr.sltr_cutfrac, 'ratio': params.lr.sltr_ratio}
     lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.SlantedTriangularLR)
 
-    args = {'epochs': 1, 'weight_decay': 0, 'data': data,
+    # Find places to save model
+    save_dir = mt_save_dir(PATH / 'models', _newdir=True)
+
+    # Start to put permanent things there, like the itos
+    mt_save(save_dir,
+            pickle_stuff=[tosave('itos.pkl', itos)])
+
+    args = {'epochs': 1, 'weight_decay': params.weight_decay, 'data': data,
             'device': device, 'opt': opt, 'loss_fn': loss_fn, 'train_fn': lm,
             'predict_fn': lm.predict, 'data_fn': data_fn, 'model': lm,
             'eval_fn': eval, 'epoch_start_hook': partial(loops.reset_hidden, lm),
-            'clip_grads_at': -1.0, 'lr_schedule': lr_schedule}
+            'clip_grads_at': params.clip_grads_at, 'lr_schedule': lr_schedule}
     traces_start = loops.generic_loop(**args)
 
     # Now unfreeze all layers and apply discr
     for grp in opt.param_groups:
-        grp['lr'] = bestlr
+        grp['lr'] = params.lr.init
 
     lr_dscr = lambda opt, lr, fctr=2.6: [lr / (fctr ** i) for i in range(len(opt.param_groups))[::-1]]
-    update_lr(opt, lr_dscr(opt, bestlr))
+    update_lr(opt, lr_dscr(opt, params.lr.init))
 
     if DEBUG:
         print([x['lr'] for x in opt.param_groups])
 
-    lr_args = {'iterations': len(data_fn(data['train']))*15, 'cut_frac': 0.1, 'ratio': 32}
+    lr_args = {'iterations': len(data_fn(data['train']))*15, 'cut_frac': params.lr.sltr_cutfrac, 'ratio': params.lr.sltr_ratio}
     lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.SlantedTriangularLR)
     args['lr_schedule'] = lr_schedule
     args['epochs'] = 15
@@ -359,14 +372,13 @@ if __name__ == "__main__":
     traces_main = loops.generic_loop(**args)
     traces = [a+b for a, b in zip(traces_start, traces_main)]
 
-    # Dumping the traces
-    DUMPPATH = PATH / 'phase2_trim_default'
-    with open(DUMPPATH / 'traces.pkl', 'wb+') as fl:
-        pickle.dump(traces, fl)
+    # Final save, just in case
+    # Dumping stuff
+    mt_save(save_dir,
+            torch_stuff=[tosave('unsup_model_enc.torch', lm.encoder.state_dict()), tosave('unsup_model.torch', lm.state_dict())],
+            pickle_stuff=[tosave('final_unsup_traces.pkl', traces), tosave('unsup_options.pkl', params)])
 
-    pickle.dump(itos, open(DUMPPATH / 'itos.pkl', 'wb'))
-    torch.save(lm.state_dict(), DUMPPATH / 'unsup_model.torch')
-    torch.save(lm.encoder.state_dict(), DUMPPATH / 'unsup_model_enc.torch')
+
 
 
 
