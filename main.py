@@ -66,7 +66,7 @@ WIKI_CLASSES = ['wiki.train.tokens', 'wiki.valid.tokens', 'wiki.test.tokens']
 class DomainAgnosticSampler:
     """ Sample data for language model training from two different domains in one batch. """
 
-    def __init__(self, data_fn, data_a, data_b):
+    def __init__(self, data_fn_a, data_fn_b, data_a, data_b):
         """
             Here, data_fn would be something like
                 `partial(text.LanguageModelLoader, bs=bs, bptt=bptt)`
@@ -74,12 +74,12 @@ class DomainAgnosticSampler:
                 `{'train': np.concatenate(trn_lm), 'valid': np.concatenate(val_lm)}['train']`
             data_fn (fastai's language model loader) flattens y and returns x of seqlen, batchsize
         """
-        self.args = {'data_fn': data_fn, 'data_a': data_a, 'data_b': data_b}
+        self.args = {'data_fn_a': data_fn_a, 'data_fn_b': data_fn_b, 'data_a': data_a, 'data_b': data_b}
         self.reset(**self.args)
 
-    def reset(self, data_fn, data_a, data_b):
-        self.itera = iter(data_fn(data_a))
-        self.iterb = iter(data_fn(data_b))
+    def reset(self, data_fn_a, data_fn_b, data_a, data_b):
+        self.itera = iter(data_fn_a(data_a))
+        self.iterb = iter(data_fn_b(data_b))
 
     def __iter__(self):
         return self
@@ -90,8 +90,8 @@ class DomainAgnosticSampler:
         return self._combine_batch_(x_a, x_b, y_a, y_b)
 
     def __len__(self):
-        return min(len(self.args['data_fn'](self.args['data_a'])),
-                   len(self.args['data_fn'](self.args['data_b'])))
+        return min(len(self.args['data_fn_a'](self.args['data_a'])),
+                   len(self.args['data_fn_b'](self.args['data_b'])))
 
     @staticmethod
     def _combine_batch_(x_a, x_b, y_a, y_b):
@@ -102,6 +102,8 @@ class DomainAgnosticSampler:
 
              Returns x, y, y_dom in similar shapes as input
         """
+
+        print(x_a.shape, x_b.shape, y_a.shape, y_b.shape)
 
         # Get them to interpretable shapes
         y_a = y_a.reshape(x_a.shape).transpose(1, 0)
@@ -127,6 +129,49 @@ class DomainAgnosticSampler:
 
         return x, y, y_dom
 
+
+class CustomLanguageModelLoader:
+    """
+        Customising fastai.text.LanguageModelLoader (ignoring the recent old-new dichotomy)
+            to not return one shifted sequence as the y label, but actually keep both x and y and co-sample them.
+    """
+    def __init__(self, data, bs, bptt, backwards=False):
+        x,y = data.values()
+        assert len(x) == len(y), "Mismatch lens of X and Y."
+        self.bs,self.bptt,self.backwards = bs,bptt,backwards
+        self.data_x, self.data_y = self.batchify(x,y)
+        self.i,self.iter = 0,0
+        self.n = len(self.data_x)
+
+    def __iter__(self):
+        self.i,self.iter = 0,0
+        while self.i < self.n-1 and self.iter<len(self):
+            if self.i == 0:
+                seq_len = self.bptt + 5 * 5
+            else:
+                bptt = self.bptt if np.random.random() < 0.95 else self.bptt / 2.
+                seq_len = max(5, int(np.random.normal(bptt, 5)))
+            res = self.get_batch(self.i, seq_len)
+            self.i += seq_len
+            self.iter += 1
+            yield res
+
+    def __len__(self): return self.n // self.bptt - 1
+
+    def batchify(self, data_x, data_y):
+        nb = data_x.shape[0] // self.bs
+        data_x = np.array(data_x[:nb*self.bs])
+        data_y = np.array(data_y[:nb*self.bs])
+        data_x = data_x.reshape(self.bs, -1).T
+        data_y = data_y.reshape(self.bs, -1).T
+        if self.backwards:
+            data_x=data_x[::-1]
+            data_y=data_y[::-1]
+        return T(data_x), T(data_y)
+
+    def get_batch(self, i, seq_len):
+        seq_len = min(seq_len, len(self.data_x) - 1 - i)
+        return self.data_x[i:i+seq_len], self.data_y[i+1:i+seq_len].view(-1)
 
 '''
     Data Functions
@@ -690,10 +735,11 @@ if __name__ == '__main__':
     loss_aux_fn = F.cross_entropy
 
     # Make data
-    data_fn_unidomain = partial(text.LanguageModelLoader, bs=bs, bptt=bptt)
+    data_fn_simple = partial(text.LanguageModelLoader, bs=bs, bptt=bptt)
+    data_fn_presampled = partial(CustomLanguageModelLoader, bs=bs, bptt=bptt)
     data_imdb = {'train': np.concatenate(trn_lm), 'valid': np.concatenate(val_lm)}
-    data_wiki = {'train': np.concatenate(wiki_trn_lm), 'valid': np.concatenate(wiki_val_lm)}
-    data_fn = partial(DomainAgnosticSampler, data_fn=data_fn_unidomain)
+    data_wiki = {'train': np.concatenate(wiki_trn_lm), 'valid': np.concatenate(wiki_val_lm)}  # @TODO: replace this.
+    data_fn = partial(DomainAgnosticSampler, data_fn_a=data_fn_simple, data_fn_b=data_fn_presampled)
 
     # Set up lr and freeze stuff
     for grp in opt.param_groups:
