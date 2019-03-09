@@ -294,16 +294,17 @@ class LanguageModel(nn.Module):
     def __init__(self,
                  _parameter_dict,
                  _device,
-                 _wgts_e,
-                 _wgts_d,
-                 _encargs):
+                 _encargs,
+                 _wgts_e=None,
+                 _wgts_d=None):
         super(LanguageModel, self).__init__()
 
         self.parameter_dict = _parameter_dict
         self.device = _device
 
         self.encoder = CustomEncoder(**_encargs).to(self.device)
-        self.encoder.load_state_dict(_wgts_e)
+        if _wgts_e:
+            self.encoder.load_state_dict(_wgts_e)
         """
             Explanation:
                 400*3 because input is [ h_T, maxpool, meanpool ]
@@ -317,13 +318,6 @@ class LanguageModel(nn.Module):
             bias=False
         ).to(self.device)
 
-        # self.linear_dom = CustomLinear(
-        #     2,
-        #     n_hid=400,
-        #     dropout=0.1 * 0.7,
-        #     #             tie_encoder=self.encoder.encoder,
-        #     bias=False
-        # ).to(self.device)
         self.linear_dom = CustomLinear(layers=params.domclas_layers, drops=params.domclas_drops).to(self.device)
         self.encoder.reset()
 
@@ -338,10 +332,6 @@ class LanguageModel(nn.Module):
 
     @property
     def layers(self):
-        # layers = [x for x in self.encoder.layers]
-        # layers.append(torch.nn.ModuleList([x for x in self.linear_dec.layers]))
-        # layers.append(torch.nn.ModuleList([x for x in self.linear_dom.layers]))
-        # return torch.nn.ModuleList(layers)
         return self.encoder.layers.extend(self.linear_dec.layers).extend(self.linear_dom.layers)
 
     def predict(self, x):
@@ -393,6 +383,7 @@ def generic_loop(epochs: int,
                  save_params,
                  save_dir: Path = None,
                  save_best: bool = False,
+                 save_above: float = -np.inf,
                  epoch_start_hook: Callable = None,
                  epoch_end_hook: Callable = None,
                  batch_start_hook: Callable = None,
@@ -436,6 +427,7 @@ def generic_loop(epochs: int,
     :param save_best: bool which wants either doesn't save, or saves at best
     :param save_dir: Path object to which we save stuff (based on save_best)
     :param save_params: a dict of all the params used while running and training the model.
+    :param save_above: [OPTIONAL] acts as threshold regarading model saving. If the current epoch's accuracy is less than this, won't.
     :param data_fn: a class to which we can pass X and Y, and get an iterator.
     :param eval_fn: function which when given pred and true, returns acc
     :param eval_aux_fn: same as eval_fn but for domain classifier's output.
@@ -548,7 +540,10 @@ def generic_loop(epochs: int,
                  'time': timer.interval / 60.0})
 
         # Save block (flag and condition)
-        if save_best and per_epoch_tr_acc_main[-1] is np.max(per_epoch_tr_acc_main):
+        if save_best and train_acc_main[-1] >= save_above:
+
+            # Update threshold
+            save_above = train_acc_main[-1]
 
             # Adding epoch info along with options
             save_params.epoch = e
@@ -568,11 +563,12 @@ def generic_loop(epochs: int,
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Domain adversarial for ULMFiT\'s language models')
-    parser.add_argument("-t", "--trim", type=bool, required=False, help="True if you want to only train on first 1000 train,test samples")
+    parser.add_argument("-t", "--quick", type=bool, required=False, help="True if you want to only train on first 1000 train,test samples")
     parser.add_argument("-d", "--debug", type=bool, required=False, help="True if you want a verbose run")
+    parser.add_argument("-p", "--pretrained", type=bool, required=False, help="False if you don't want to load pretrained weights in LM")
     parse_args = vars(parser.parse_args())
-    TRIM, DEBUG = parse_args['trim'], parse_args['debug']
-    params.trim = TRIM
+    QUICK, DEBUG, PRETRAINED = parse_args['quick'], parse_args['debug'], parse_args['pretrained']
+    params.quick = QUICK
 
     '''
         Start making data
@@ -588,7 +584,7 @@ if __name__ == '__main__':
     '''
         Crop data
     '''
-    if params.trim:
+    if params.quick:
         trn_texts, val_texts = trn_texts[:1000], val_texts[:1000]
         wiki_trn_texts, wiki_val_texts, wiki_tst_texts = wiki_trn_texts[:1000], wiki_val_texts[:1000], wiki_tst_texts[:1000]
 
@@ -729,7 +725,7 @@ if __name__ == '__main__':
                'qrnn': False, 'dropouti': dps[0],
                'wdrop': dps[2], 'dropoute': dps[3], 'dropouth': dps[4]}
 
-    lm = LanguageModel(parameter_dict, device, _wgts_e=wgts_enc, _wgts_d=wgts_dec, _encargs=encargs)
+    lm = LanguageModel(parameter_dict, device, _wgts_e=wgts_enc if PRETRAINED else None, _wgts_d=wgts_dec, _encargs=encargs)
     opt = make_opt(lm, opt_fn, lr=params.lr.init)
     loss_main_fn = F.cross_entropy
     loss_aux_fn = F.cross_entropy
@@ -748,7 +744,7 @@ if __name__ == '__main__':
     opt.param_groups[4]['lr'] = params.lr.init
 
     # lr_args = {'batches':, 'cycles': 1}
-    lr_args = {'iterations': len(data_fn(data_a=data_wiki['train'], data_b=data_imdb['train'])),
+    lr_args = {'iterations': len(data_fn(data_b=data_wiki['train'], data_a=data_imdb['train'])),
                'cut_frac': params.lr.sltr_cutfrac, 'ratio': params.lr.sltr_ratio}
     lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.SlantedTriangularLR)
 
@@ -782,11 +778,12 @@ if __name__ == '__main__':
     if DEBUG:
         print([x['lr'] for x in opt.param_groups])
 
-    lr_args = {'iterations': len(data_fn(data_a=data_wiki['train'], data_b=data_imdb['train'])) * 15,
+    lr_args = {'iterations': len(data_fn(data_b=data_wiki['train'], data_a=data_imdb['train'])) * 15,
                'cut_frac': params.lr.sltr_cutfrac, 'ratio': params.lr.sltr_ratio}
     lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.SlantedTriangularLR)
     args['lr_schedule'] = lr_schedule
     args['epochs'] = 15
+    args['save_above'] = np.max(traces_start[0])
 
     traces_main = generic_loop(**args)
     traces = [a + b for a, b in zip(traces_start, traces_main)]

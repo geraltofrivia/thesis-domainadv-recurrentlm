@@ -180,13 +180,13 @@ if __name__ == "__main__":
 
     # Get args from console
     ap = argparse.ArgumentParser()
-    ap.add_argument("-t", "--trim", type=bool, required=False, help="True if you want to only train on first 1000 train,test samples")
+    ap.add_argument("-t", "--quick", type=bool, required=False, help="True if you want to only train on first 1000 train,test samples")
     ap.add_argument("-d", "--debug", type=bool, required=False, help="True if you want a verbose run")
     ap.add_argument("-md", "--modeldir", required=True,
                     help="Need to provide the folder name (not the entire dir) to the desired phase 2 model. "
                          "E.g. `--modeldir 2` shall suffice.")
     args = vars(ap.parse_args())
-    TRIM, DEBUG, MODEL_NUM = args['trim'], args['debug'], args['modeldir']
+    QUICK, DEBUG, MODEL_NUM = args['quick'], args['debug'], args['modeldir']
     UNSUP_MODEL_DIR = PATH / 'models' / MODEL_NUM
 
     trn_texts, trn_labels = get_texts_org(DATA_PATH / 'train')
@@ -197,7 +197,7 @@ if __name__ == "__main__":
     trn_labels = trn_labels[trn_labels<2]
 
     # Shuffle data
-    if TRIM:
+    if QUICK:
         np.random.seed(42)
         trn_idx = np.random.permutation(len(trn_texts))[:1000]
         val_idx = np.random.permutation(len(val_texts))[:1000]
