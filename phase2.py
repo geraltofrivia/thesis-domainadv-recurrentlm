@@ -53,16 +53,17 @@ class LanguageModel(nn.Module):
     def __init__(self,
                  _parameter_dict,
                  _device,
-                 _wgts_e,
-                 _wgts_d,
-                 _encargs):
+                 _encargs,
+                 _wgts_e=None,
+                 _wgts_d=None):
         super(LanguageModel, self).__init__()
 
         self.parameter_dict = _parameter_dict
         self.device = _device
 
         self.encoder = CustomEncoder(**_encargs).to(self.device)
-        self.encoder.load_state_dict(_wgts_e)
+        if _wgts_e:
+            self.encoder.load_state_dict(_wgts_e)
         """
             Explanation:
                 400*3 because input is [ h_T, maxpool, meanpool ]
@@ -174,17 +175,19 @@ def get_all(df, n_lbls):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='Vanilla Phase 2 for ULMFiT\'s language models')
-    parser.add_argument("-t", "--trim", type=bool, required=False,
+    parser.add_argument("-t", "--quick", type=bool, required=False,
                         help="True if you want to only train on first 1000 train,test samples")
     parser.add_argument("-d", "--debug", type=bool, required=False, help="True if you want a verbose run")
+    parser.add_argument("-", "--pretrained", type=bool, required=False, help="False if you dont want to load pretrained weights of LM")
     parse_args = vars(parser.parse_args())
-    TRIM, DEBUG = parse_args['trim'], parse_args['debug']
-    params.trim = TRIM
+    QUICK, DEBUG = parse_args['quick'], parse_args['debug']
+    PRETRAINED = False
+    params.quick = QUICK
 
     trn_texts, trn_labels = get_texts_org(DATA_PATH / 'train')
     val_texts, val_labels = get_texts_org(DATA_PATH / 'test')
 
-    if TRIM:
+    if QUICK:
         trn_texts, val_texts = trn_texts[:1000], val_texts[:1000]
 
     col_names = ['labels', 'text']
