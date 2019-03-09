@@ -58,6 +58,8 @@ CLASSES = ['neg', 'pos', 'unsup']
 '''
     Model code
 '''
+
+
 class CustomEncoder(lm_rnn.MultiBatchRNN):
     @property
     def layers(self):
@@ -70,7 +72,12 @@ class CustomEncoder(lm_rnn.MultiBatchRNN):
 class TextClassifier(nn.Module):
 
     # @TODO: inject comments.
-    def __init__(self, _device: torch.device, ntoken: int, dps: list, enc_wgts, _debug=False):
+    def __init__(self,
+                 _device: torch.device,
+                 ntoken: int,
+                 dps: list,
+                 enc_wgts = None,
+                 _debug=False):
         super(TextClassifier, self).__init__()
 
         self.device = _device
@@ -80,7 +87,8 @@ class TextClassifier(nn.Module):
                 'n_layers': 3, 'pad_token': 0, 'qrnn': False, 'bptt': 70, 'max_seq': 1400,
                 'dropouti': dps[0], 'wdrop': dps[1], 'dropoute': dps[2], 'dropouth': dps[3]}
         self.encoder = CustomEncoder(**args).to(self.device)
-        self.encoder.load_state_dict(enc_wgts)
+        if enc_wgts:
+            self.encoder.load_state_dict(enc_wgts)
         '''
             Make new classifier.
             
@@ -180,13 +188,14 @@ if __name__ == "__main__":
 
     # Get args from console
     ap = argparse.ArgumentParser()
-    ap.add_argument("-t", "--quick", type=bool, required=False, help="True if you want to only train on first 1000 train,test samples")
+    ap.add_argument("-q", "--quick", type=bool, required=False, help="True if you want to only train on first 1000 train,test samples")
     ap.add_argument("-d", "--debug", type=bool, required=False, help="True if you want a verbose run")
+    ap.add_argument("-p", "--pretrained", type=bool, required=False, help="True if you want a verbose run")
     ap.add_argument("-md", "--modeldir", required=True,
                     help="Need to provide the folder name (not the entire dir) to the desired phase 2 model. "
                          "E.g. `--modeldir 2` shall suffice.")
     args = vars(ap.parse_args())
-    QUICK, DEBUG, MODEL_NUM = args['quick'], args['debug'], args['modeldir']
+    QUICK, DEBUG, MODEL_NUM, PRETRAINED = args['quick'], args['debug'], args['modeldir'], args['pretrained']
     UNSUP_MODEL_DIR = PATH / 'models' / MODEL_NUM
 
     trn_texts, trn_labels = get_texts_org(DATA_PATH / 'train')
@@ -231,7 +240,7 @@ if __name__ == "__main__":
     dps = list(params.encoder_dropouts)
     # enc_wgts = torch.load(LM_PATH, map_location=lambda storage, loc: storage)
     enc_wgts = torch.load(UNSUP_MODEL_DIR / 'unsup_model_enc.torch', map_location=lambda storage, loc: storage)
-    clf = TextClassifier(device, len(itos2), dps, enc_wgts)
+    clf = TextClassifier(device, len(itos2), dps, enc_wgts=enc_wgts if PRETRAINED else None)
 
     '''
         Setup things for training (data, loss, opt, lr schedule etc
