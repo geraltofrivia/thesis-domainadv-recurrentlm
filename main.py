@@ -349,7 +349,9 @@ def generic_loop(epochs: int,
                  save_params,
                  save_dir: Path = None,
                  save_best: bool = False,
-                 save_above: float = -np.inf,
+                 save_above_trn: float = -np.inf,
+                 save_above_aux: float = np.inf,
+                 epoch_count: int = 0,
                  epoch_start_hook: Callable = None,
                  epoch_end_hook: Callable = None,
                  batch_start_hook: Callable = None,
@@ -366,10 +368,16 @@ def generic_loop(epochs: int,
         The model need not be an nn.Module,
              but should have correctly wired forward and a predict function.
 
-        Data should be a dict like so:
-            {"train":{"x":np.arr, "y":np.arr}, "val":{"x":np.arr, "y":np.arr} }
+        # Data input
+            Data should be a dict like so:
+                {"train":{"x":np.arr, "y":np.arr}, "val":{"x":np.arr, "y":np.arr} }
 
-        Train_fn must return both loss and y_pred
+            Train_fn must return both loss and y_pred
+
+        # Saving Logic
+            There are two conditions on which it saves models (named differently).
+            1. Highest train accuracy
+            2. Lowest auxiliary accuracy (which is empirically seen to stablize after two epochs) after two epochs have passed
 
     :param epochs: number of epochs to train for
     :param data_a: data dict (structure specified above) (main)
@@ -383,6 +391,7 @@ def generic_loop(epochs: int,
     :param train_fn: a function which takes x & y, returns loss and y_pred
     :param train_aux_fn: a function which takes x & y, returns loss and y_pred_aux
     :param predict_fn: a fn which takes x and returns y_pred
+    :param epoch_count: an int which is added with #epochs (for better representation of how many epochs have actually passed)
     :param epoch_start_hook: a fn that can be called @ start of every epoch (returns model, opt)
     :param epoch_end_hook: a fn that can be called @ end of every epoch (returns model, opt)
     :param batch_start_hook: a fn that can be called @ start of every batch (returns model, opt)
@@ -393,7 +402,8 @@ def generic_loop(epochs: int,
     :param save_best: bool which wants either doesn't save, or saves at best
     :param save_dir: Path object to which we save stuff (based on save_best)
     :param save_params: a dict of all the params used while running and training the model.
-    :param save_above: [OPTIONAL] acts as threshold regarading model saving. If the current epoch's accuracy is less than this, won't.
+    :param save_above_trn: [OPTIONAL] acts as threshold regarading model saving. If the current trn accuracy is less than this, won't.
+    :param save_above_aux: [OPTIONAL] acts as threshold regarading model saving. If the current aux accuracy is more than this, won't.
     :param data_fn: a class to which we can pass X and Y, and get an iterator.
     :param eval_fn: function which when given pred and true, returns acc
     :param eval_aux_fn: same as eval_fn but for domain classifier's output.
@@ -497,7 +507,7 @@ def generic_loop(epochs: int,
               "Vl_c: %(vlacc)0.5f | "
               "Tr_aux: %(tracc_aux)0.4f | "
               " Time: %(time).3f m"
-              % {'epo': e,
+              % {'epo': e+epoch_count,
                  'loss': float(np.mean(per_epoch_loss_main)),
                  'loss_aux': float(np.mean(per_epoch_loss_aux)),
                  'tracc': float(np.mean(per_epoch_tr_acc_main)),
@@ -506,22 +516,40 @@ def generic_loop(epochs: int,
                  'time': timer.interval / 60.0})
 
         # Save block (flag and condition)
-        if save_best and train_acc_main[-1] >= save_above:
+        if save_best and train_acc_main[-1] >= save_above_trn:
 
             # Update threshold
-            save_above = train_acc_main[-1]
+            save_above_trn = train_acc_main[-1]
 
             # Adding epoch info along with options
             save_params.epoch = e
 
             # Call save function and save
             mt_save(save_dir,
-                    torch_stuff=[tosave('unsup_model.torch', model.state_dict()),
-                                 tosave('unsup_model_enc.torch', model.encoder.state_dict())],
+                    torch_stuff=[tosave('unsup_model_hightrn.torch', model.state_dict()),
+                                 tosave('unsup_model_enc_hightrn.torch', model.encoder.state_dict())],
                     pickle_stuff=[tosave('unsup_traces.pkl', [train_acc_main, val_acc, train_acc_aux, train_loss_main, train_loss_aux, lrs]),
                                   tosave('unsup_options.pkl', save_params)],
                     _newdir=True)
-            print(f"Model saved on Epoch {e} at save_dir")
+            print(f"Model saved on Epoch {e} at {save_dir} because of highest training acc so far")
+
+        # Save block (flag and condition) (When more than 2 epochs have pased and we see lowest aux accuracy)
+        if save_best and e > 1 and train_acc_aux[-1] <= save_above_aux:
+            # Update threshold
+            save_above_aux = train_acc_aux[-1]
+
+            # Adding epoch info along with options
+            save_params.epoch = e
+
+            # Call save function and save
+            mt_save(save_dir,
+                    torch_stuff=[tosave('unsup_model_lowaux.torch', model.state_dict()),
+                                 tosave('unsup_model_enc_lowaux.torch', model.encoder.state_dict())],
+                    pickle_stuff=[
+                        tosave('unsup_traces.pkl', [train_acc_main, val_acc, train_acc_aux, train_loss_main, train_loss_aux, lrs]),
+                        tosave('unsup_options.pkl', save_params)],
+                    _newdir=True)
+            print(f"Model saved on Epoch {e} at {save_dir} because of lowest auxiliary accuracy so far")
 
     return train_acc_main, val_acc, train_acc_aux, train_loss_main, train_loss_aux, lrs
 
@@ -532,10 +560,14 @@ if __name__ == '__main__':
     parser.add_argument("-t", "--quick", type=bool, required=False,
                         help="True if you want to only train on first 1000 train,test samples")
     parser.add_argument("-d", "--debug", type=bool, required=False, help="True if you want a verbose run")
+    parser.add_argument("-m", "--message", type=str, required=False, help="Message to be saved alongwith traces", default='')
     parser.add_argument("-p", "--pretrained", type=bool, required=False,
                         help="False if you don't want to load pretrained weights in LM")
+
     parse_args = vars(parser.parse_args())
     QUICK, DEBUG, PRETRAINED = parse_args['quick'], parse_args['debug'], parse_args['pretrained']
+    MESSAGE = parse_args['message']
+    params.message = MESSAGE
     params.quick = QUICK
 
     '''
@@ -751,6 +783,7 @@ if __name__ == '__main__':
     args['save_above'] = np.max(traces_start[0])
     args['lr_schedule'] = lr_schedule
     args['epochs'] = 15
+    args['epoch_count'] = 1
 
     traces_main = generic_loop(**args)
     traces = [a + b for a, b in zip(traces_start, traces_main)]
@@ -758,5 +791,22 @@ if __name__ == '__main__':
     # Final save, just in case
     # Dumping stuff
     mt_save(save_dir,
+            torch_stuff=[tosave('final_unsup_model.torch', lm.state_dict()),
+                         tosave('final_unsup_model_enc.torch', lm.encoder.state_dict())],
             pickle_stuff=[tosave('final_unsup_traces.pkl', traces), tosave('unsup_options.pkl', params)])
+
+    # Interpreting Traces
+    trn_best = np.max(traces[0])
+    trn_best_ = np.argmax(traces[0])
+    val_attrn = traces[1][trn_best_]
+    val_best = np.max(traces[1])
+    val_best_ = np.argmax(traces[1])
+    aux_attrn = traces[2][trn_best_]
+    aux_best = np.min(traces[2][2:])
+    aux_best_ = np.argmin(traces[2][2:])
+    print(f"Train Best: {trn_best:.4f} at {trn_best_}\n"
+          f"Valid @Trn: {val_attrn:.4f}\n"
+          f"Valid Best: {val_best:.4f} at {val_best_}\n"
+          f"DomAg @Trn: {aux_attrn:.4f}\n"
+          f"DomAg Best: {aux_best:.4f} at {aux_best_}")
 

@@ -191,12 +191,16 @@ if __name__ == "__main__":
     ap.add_argument("-q", "--quick", type=bool, required=False, help="True if you want to only train on first 1000 train,test samples")
     ap.add_argument("-d", "--debug", type=bool, required=False, help="True if you want a verbose run")
     ap.add_argument("-p", "--pretrained", type=bool, required=False, help="True if you want a verbose run")
+    ap.add_argument("-ms", "--modelsuffix", default='_lowaux', type=str, help="Input either `_lowaux`;`_hightrn` or nothing depending on which kind of model you want to load.")
     ap.add_argument("-md", "--modeldir", required=True,
                     help="Need to provide the folder name (not the entire dir) to the desired phase 2 model. "
                          "E.g. `--modeldir 2` shall suffice.")
+
     args = vars(ap.parse_args())
     QUICK, DEBUG, MODEL_NUM, PRETRAINED = args['quick'], args['debug'], args['modeldir'], args['pretrained']
+    MODEL_SUFFIX = args['modelsuffix']
     UNSUP_MODEL_DIR = PATH / 'models' / MODEL_NUM
+    assert MODEL_SUFFIX in ['_lowaux', '_hightrn', ''], 'Incorrect Suffix given with which to load model'
 
     trn_texts, trn_labels = get_texts_org(DATA_PATH / 'train')
     val_texts, val_labels = get_texts_org(DATA_PATH / 'test')
@@ -239,7 +243,7 @@ if __name__ == "__main__":
     '''
     dps = list(params.encoder_dropouts)
     # enc_wgts = torch.load(LM_PATH, map_location=lambda storage, loc: storage)
-    enc_wgts = torch.load(UNSUP_MODEL_DIR / 'unsup_model_enc.torch', map_location=lambda storage, loc: storage)
+    enc_wgts = torch.load(UNSUP_MODEL_DIR / 'unsup_model_enc' + MODEL_SUFFIX + '.torch', map_location=lambda storage, loc: storage)
     clf = TextClassifier(device, len(itos2), dps, enc_wgts=enc_wgts if PRETRAINED else None)
 
     '''
