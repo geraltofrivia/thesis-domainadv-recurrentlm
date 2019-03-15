@@ -243,7 +243,7 @@ if __name__ == "__main__":
     '''
     dps = list(params.encoder_dropouts)
     # enc_wgts = torch.load(LM_PATH, map_location=lambda storage, loc: storage)
-    enc_wgts = torch.load(UNSUP_MODEL_DIR / 'unsup_model_enc' + MODEL_SUFFIX + '.torch', map_location=lambda storage, loc: storage)
+    enc_wgts = torch.load(UNSUP_MODEL_DIR / ('unsup_model_enc' + MODEL_SUFFIX + '.torch'), map_location=lambda storage, loc: storage)
     clf = TextClassifier(device, len(itos2), dps, enc_wgts=enc_wgts if PRETRAINED else None)
 
     '''
