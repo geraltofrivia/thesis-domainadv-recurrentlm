@@ -5,22 +5,20 @@
 - ~~Get Domain Classification Accuracy~~
      
 - Fix all hyperparams as the same as the org implementation
-- Run it in default setting and replicate their results verbatim
-    - Try to run their results without mixing val data during phase 2.  
+- ~~Run it in default setting and replicate their results verbatim~~
+    - ~~Try to run their results without mixing val data during phase 2. Conc: No **noticable change**~~  
     
 - Convert the 2-layer lin decoder to have no activation on first, and a softmax on second (eq.4 https://arxiv.org/pdf/1704.04368.pdf) 
-- Better saving stuff. Put ph2ph3 in one folder somehow, and everything.
+- ~~Better saving stuff. Put ph2ph3 in one folder somehow, and everything.~~
 
 
 # things which might work out
 
 1. Using words from wiki during phase2 (implmenentation done)
-2. Skipping phase1 (just train from scratch using DNN) (implementation 20min)
-3. Using different optimizer than ADAM (SGD) (implementation 1min)
-4. Using diff learning rate for dom clf ($lambda$ in paper) (implementation 2hr)
-5. Different datasets.
-
-How do i decide when something finally works?
+2. ~~Skipping phase1 (just train from scratch using DNN) (implementation 20min)~~
+3. ~~Using different optimizer than ADAM (SGD) (implementation 1min)~~
+4. ~~Using diff learning rate for dom clf ($lambda$ in paper) (implementation 2hr)~~
+5. Different datasets. LOL, later, alligator
 
 
 ## 18th Feb
@@ -30,17 +28,6 @@ Now, both train and val go to 0, while dann rests around 55%.
 What's happening? No clue!~~ [FIXED: Was a bug in code.]
 
 ~~* Loss scaling factor 0.5 -> disproportionate focus on improving both aux and normal loss (both loss decreasing).~~
-
-
-
-
-## Exp Schedule
-
-1. Run DANN code with lambda = 1.0 and see if it works as we want.
-1. What happens when we run main.py without DANN?
-
-    1. What happens when we run main.py without tied weights without DANN?
-        Kinda like when we run phase2.py without tied weights.
         
 ----------------------------------------------------------------
 

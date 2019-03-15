@@ -178,9 +178,10 @@ if __name__ == "__main__":
     parser.add_argument("-t", "--quick", type=bool, required=False,
                         help="True if you want to only train on first 1000 train,test samples")
     parser.add_argument("-d", "--debug", type=bool, required=False, help="True if you want a verbose run")
+    parser.add_argument("-m", "--message", type=str, required=False, help="Message to be saved alongwith traces", default=None)
     parser.add_argument("-", "--pretrained", type=bool, required=False, help="False if you dont want to load pretrained weights of LM")
     parse_args = vars(parser.parse_args())
-    QUICK, DEBUG = parse_args['quick'], parse_args['debug']
+    QUICK, DEBUG, MESSAGE = parse_args['quick'], parse_args['debug'], parse_args['message']
     PRETRAINED = False
     params.quick = QUICK
 
@@ -371,14 +372,15 @@ if __name__ == "__main__":
     lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.SlantedTriangularLR)
     args['lr_schedule'] = lr_schedule
     args['epochs'] = 15
+    args['notify'] = True
 
     traces_main = loops.generic_loop(**args)
     traces = [a+b for a, b in zip(traces_start, traces_main)]
 
     # Final save, just in case
     # Dumping stuff
-    mt_save(save_dir,
-            torch_stuff=[tosave('unsup_model_enc.torch', lm.encoder.state_dict()), tosave('unsup_model.torch', lm.state_dict())],
+    mt_save(save_dir, message=MESSAGE,
+            torch_stuff=[tosave('unsup_model_enc_final.torch', lm.encoder.state_dict()), tosave('unsup_model_final.torch', lm.state_dict())],
             pickle_stuff=[tosave('final_unsup_traces.pkl', traces), tosave('unsup_options.pkl', params)])
 
 

@@ -360,7 +360,9 @@ def generic_loop(epochs: int,
                  clip_grads_at: float = params.clip_grads_at,
                  lr_schedule = None,
                  eval_fn: Callable = None,
-                 eval_aux_fn: Callable = None) -> (list, list, list):
+                 eval_aux_fn: Callable = None,
+                 notify: bool = False,
+                 notify_key: str = None) -> (list, list, list):
     """
 
         A generic training loop, which based on diff hook fns (defined below), should handle anything given to it.
@@ -377,7 +379,7 @@ def generic_loop(epochs: int,
         # Saving Logic
             There are two conditions on which it saves models (named differently).
             1. Highest train accuracy
-            2. Lowest auxiliary accuracy (which is empirically seen to stablize after two epochs) after two epochs have passed
+            2. Lowest auxiliary accuracy (which is empirically seen to stabilize after two epochs) after two epochs have passed
 
     :param epochs: number of epochs to train for
     :param data_a: data dict (structure specified above) (main)
@@ -392,6 +394,7 @@ def generic_loop(epochs: int,
     :param train_aux_fn: a function which takes x & y, returns loss and y_pred_aux
     :param predict_fn: a fn which takes x and returns y_pred
     :param epoch_count: an int which is added with #epochs (for better representation of how many epochs have actually passed)
+            You can use this for when you run the loop say 3 times, do something else and run it for another 10.
     :param epoch_start_hook: a fn that can be called @ start of every epoch (returns model, opt)
     :param epoch_end_hook: a fn that can be called @ end of every epoch (returns model, opt)
     :param batch_start_hook: a fn that can be called @ start of every batch (returns model, opt)
@@ -407,6 +410,8 @@ def generic_loop(epochs: int,
     :param data_fn: a class to which we can pass X and Y, and get an iterator.
     :param eval_fn: function which when given pred and true, returns acc
     :param eval_aux_fn: same as eval_fn but for domain classifier's output.
+    :param notify: (optional) flag which enables sending notifications to your phones once the loop is done.
+    :param notify_key: (optional) the api key to which the notification is to be sent. You can give it here, or in a file (see README.md)
     :return: traces
     """
 
@@ -416,11 +421,12 @@ def generic_loop(epochs: int,
     train_acc_aux = []
     val_acc = []
     lrs = []
+    saved_info = {}
 
     assert (not save_best) or (save_best and save_dir), "No save dir specified."
 
     # Epoch level
-    for e in range(epochs):
+    for e in range(epoch_count, epochs+epoch_count):
 
         per_epoch_loss_main = []
         per_epoch_loss_aux = []
@@ -529,12 +535,17 @@ def generic_loop(epochs: int,
                     torch_stuff=[tosave('unsup_model_hightrn.torch', model.state_dict()),
                                  tosave('unsup_model_enc_hightrn.torch', model.encoder.state_dict())],
                     pickle_stuff=[tosave('unsup_traces.pkl', [train_acc_main, val_acc, train_acc_aux, train_loss_main, train_loss_aux, lrs]),
-                                  tosave('unsup_options.pkl', save_params)],
-                    _newdir=True)
+                                  tosave('unsup_options.pkl', save_params)])
             print(f"Model saved on Epoch {e} at {save_dir} because of highest training acc so far")
+
+            # Log the saved thing
+            saved_info['epoch'] = e
+            saved_info['accuracy'] = val_acc[-1]
+            saved_info['directory'] = save_dir
 
         # Save block (flag and condition) (When more than 2 epochs have pased and we see lowest aux accuracy)
         if save_best and e > 1 and train_acc_aux[-1] <= save_above_aux:
+
             # Update threshold
             save_above_aux = train_acc_aux[-1]
 
@@ -547,9 +558,16 @@ def generic_loop(epochs: int,
                                  tosave('unsup_model_enc_lowaux.torch', model.encoder.state_dict())],
                     pickle_stuff=[
                         tosave('unsup_traces.pkl', [train_acc_main, val_acc, train_acc_aux, train_loss_main, train_loss_aux, lrs]),
-                        tosave('unsup_options.pkl', save_params)],
-                    _newdir=True)
+                        tosave('unsup_options.pkl', save_params)])
             print(f"Model saved on Epoch {e} at {save_dir} because of lowest auxiliary accuracy so far")
+
+            # Log the saved thing
+            saved_info['epoch'] = e
+            saved_info['accuracy'] = val_acc[-1]
+            saved_info['directory'] = save_dir
+
+    if notify:
+        send_notification(data=saved_info, key=notify_key)
 
     return train_acc_main, val_acc, train_acc_aux, train_loss_main, train_loss_aux, lrs
 
@@ -560,7 +578,7 @@ if __name__ == '__main__':
     parser.add_argument("-t", "--quick", type=bool, required=False,
                         help="True if you want to only train on first 1000 train,test samples")
     parser.add_argument("-d", "--debug", type=bool, required=False, help="True if you want a verbose run")
-    parser.add_argument("-m", "--message", type=str, required=False, help="Message to be saved alongwith traces", default='')
+    parser.add_argument("-m", "--message", type=str, required=False, help="Message to be saved alongwith traces", default=None)
     parser.add_argument("-p", "--pretrained", type=bool, required=False,
                         help="False if you don't want to load pretrained weights in LM")
 
@@ -780,19 +798,21 @@ if __name__ == '__main__':
     lr_args = {'iterations': len(data_fn(data_a=data_wiki['train'], data_b=data_imdb['train'])) * 15,
                'cut_frac': params.lr.sltr_cutfrac, 'ratio': params.lr.sltr_ratio}
     lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.SlantedTriangularLR)
-    args['save_above'] = np.max(traces_start[0])
+    args['save_above_trn'] = np.max(traces_start[0])
+    # args['save_above_aux'] = np.min(traces_start[2][2:])  # Not updating this var since we ignore the DANN acc of the first few epochs anyway
     args['lr_schedule'] = lr_schedule
     args['epochs'] = 15
     args['epoch_count'] = 1
+    args['notify'] = True
 
     traces_main = generic_loop(**args)
     traces = [a + b for a, b in zip(traces_start, traces_main)]
 
     # Final save, just in case
     # Dumping stuff
-    mt_save(save_dir,
-            torch_stuff=[tosave('final_unsup_model.torch', lm.state_dict()),
-                         tosave('final_unsup_model_enc.torch', lm.encoder.state_dict())],
+    mt_save(save_dir, message=MESSAGE,
+            torch_stuff=[tosave('unsup_model_final.torch', lm.state_dict()),
+                         tosave('unsup_model_enc_final.torch', lm.encoder.state_dict())],
             pickle_stuff=[tosave('final_unsup_traces.pkl', traces), tosave('unsup_options.pkl', params)])
 
     # Interpreting Traces

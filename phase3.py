@@ -200,7 +200,7 @@ if __name__ == "__main__":
     QUICK, DEBUG, MODEL_NUM, PRETRAINED = args['quick'], args['debug'], args['modeldir'], args['pretrained']
     MODEL_SUFFIX = args['modelsuffix']
     UNSUP_MODEL_DIR = PATH / 'models' / MODEL_NUM
-    assert MODEL_SUFFIX in ['_lowaux', '_hightrn', ''], 'Incorrect Suffix given with which to load model'
+    assert MODEL_SUFFIX in ['_lowaux', '_hightrn', '', '_final'], 'Incorrect Suffix given with which to load model'
 
     trn_texts, trn_labels = get_texts_org(DATA_PATH / 'train')
     val_texts, val_labels = get_texts_org(DATA_PATH / 'test')
@@ -263,12 +263,15 @@ if __name__ == "__main__":
     lr_args = {'iterations': len(data_fn(data['train'])), 'cycles': 1}
     lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
 
-    args = {'epochs': 1, 'data': data, 'device': device,
+    save_args = {'torch_stuff': [tosave('model.torch', clf.state_dict()), tosave('model_enc.torch', clf.encoder.state_dict())]}
+
+    args = {'epochs': 1, 'epoch_count':0, 'data': data, 'device': device,
             'opt': opt, 'loss_fn': loss_fn, 'model': clf,
             'train_fn': clf, 'predict_fn': clf.predict,
             'epoch_end_hook': epoch_end_hook, 'weight_decay': params.weight_decay,
             'clip_grads_at': params.clip_grads_at, 'lr_schedule': lr_schedule,
-            'data_fn': data_fn, 'eval_fn': eval}
+            'data_fn': data_fn, 'eval_fn': eval,
+            'save':True, 'save_params':params, 'save_dir':UNSUP_MODEL_DIR, 'save_args':save_args}
 
     '''
         Training schedule:
@@ -284,6 +287,8 @@ if __name__ == "__main__":
     opt.param_groups[-2]['lr'] = 0.005
     lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
     args['lr_schedule'] = lr_schedule
+    args['save_above'] = np.max(traces[TRACES_FORMAT['train_acc']])
+    args['epoch_count'] += 1
     traces_new = loops.generic_loop(**args)
     traces = [a+b for a, b in zip(traces, traces_new)]
 
@@ -292,6 +297,8 @@ if __name__ == "__main__":
     opt.param_groups[-3]['lr'] = 0.001
     lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
     args['lr_schedule'] = lr_schedule
+    args['save_above'] = np.max(traces[TRACES_FORMAT['train_acc']])
+    args['epoch_count'] += 1
     traces_new = loops.generic_loop(**args)
     traces = [a+b for a, b in zip(traces, traces_new)]
 
@@ -301,6 +308,8 @@ if __name__ == "__main__":
     opt.param_groups[-4]['lr'] = 0.001
     lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
     args['lr_schedule'] = lr_schedule
+    args['save_above'] = np.max(traces[TRACES_FORMAT['train_acc']])
+    args['epoch_count'] += 1
     traces_new = loops.generic_loop(**args)
     traces = [a+b for a, b in zip(traces, traces_new)]
 
@@ -311,6 +320,8 @@ if __name__ == "__main__":
     opt.param_groups[-5]['lr'] = 0.001
     lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
     args['lr_schedule'] = lr_schedule
+    args['save_above'] = np.max(traces[TRACES_FORMAT['train_acc']])
+    args['epoch_count'] += 1
     traces_new = loops.generic_loop(**args)
     traces = [a+b for a, b in zip(traces, traces_new)]
 
@@ -323,9 +334,13 @@ if __name__ == "__main__":
     args['epochs'] = 15
     lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
     args['lr_schedule'] = lr_schedule
+    args['save_above'] = np.max(traces[TRACES_FORMAT['train_acc']])
+    args['epoch_count'] += 1
+    args['notify'] = True
+
     traces_new = loops.generic_loop(**args)
     traces = [a+b for a, b in zip(traces, traces_new)]
 
     mt_save(UNSUP_MODEL_DIR,
-            torch_stuff=[tosave('sup_model.torch', clf.state_dict())],
+            torch_stuff=[tosave('sup_model_final.torch', clf.state_dict())],
             pickle_stuff=[tosave('final_sup_traces.pkl', traces), tosave('unsup_options.pkl', params)])
