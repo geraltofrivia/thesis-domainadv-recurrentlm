@@ -436,6 +436,8 @@ def generic_loop(epochs: int,
         # Train
         with Timer() as timer:
 
+            model.train()
+
             # @TODO: Add hook at start of epoch (how to decide what goes in)
             if epoch_start_hook: epoch_start_hook()
 
@@ -489,6 +491,8 @@ def generic_loop(epochs: int,
 
         # Val
         with torch.no_grad():
+
+            model.eval()
 
             per_epoch_vl_acc = []
             for x, y, y_aux in tqdm(val_dl):
