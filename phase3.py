@@ -191,6 +191,7 @@ if __name__ == "__main__":
     ap.add_argument("-q", "--quick", type=bool, required=False, help="True if you want to only train on first 1000 train,test samples")
     ap.add_argument("-d", "--debug", type=bool, required=False, help="True if you want a verbose run")
     ap.add_argument("-p", "--pretrained", type=bool, required=False, help="True if you want a verbose run")
+    ap.add_argument("-sf", "--safemode", type=bool, required=False, help="True if you dont want to save anything")
     ap.add_argument("-ms", "--modelsuffix", default='_lowaux', type=str, help="Input either `_lowaux`;`_hightrn` or nothing depending on which kind of model you want to load.")
     ap.add_argument("-md", "--modeldir", required=True,
                     help="Need to provide the folder name (not the entire dir) to the desired phase 2 model. "
@@ -199,6 +200,7 @@ if __name__ == "__main__":
     args = vars(ap.parse_args())
     QUICK, DEBUG, MODEL_NUM, PRETRAINED = args['quick'], args['debug'], args['modeldir'], args['pretrained']
     MODEL_SUFFIX = args['modelsuffix']
+    SAFE_MODE = args['safemode']
     UNSUP_MODEL_DIR = PATH / 'models' / MODEL_NUM
     assert MODEL_SUFFIX in ['_lowaux', '_hightrn', '', '_final'], 'Incorrect Suffix given with which to load model'
 
@@ -271,7 +273,7 @@ if __name__ == "__main__":
             'epoch_end_hook': epoch_end_hook, 'weight_decay': params.weight_decay,
             'clip_grads_at': params.clip_grads_at, 'lr_schedule': lr_schedule,
             'data_fn': data_fn, 'eval_fn': eval,
-            'save':True, 'save_params':params, 'save_dir':UNSUP_MODEL_DIR, 'save_args':save_args}
+            'save': not SAFE_MODE, 'save_params': params, 'save_dir': UNSUP_MODEL_DIR, 'save_args': save_args}
 
     '''
         Training schedule:
@@ -341,6 +343,7 @@ if __name__ == "__main__":
     traces_new = loops.generic_loop(**args)
     traces = [a+b for a, b in zip(traces, traces_new)]
 
-    mt_save(UNSUP_MODEL_DIR,
-            torch_stuff=[tosave('sup_model_final.torch', clf.state_dict())],
-            pickle_stuff=[tosave('final_sup_traces.pkl', traces), tosave('unsup_options.pkl', params)])
+    if not SAFE_MODE:
+        mt_save(UNSUP_MODEL_DIR,
+                torch_stuff=[tosave('sup_model_final.torch', clf.state_dict())],
+                pickle_stuff=[tosave('final_sup_traces.pkl', traces), tosave('unsup_options.pkl', params)])

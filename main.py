@@ -582,6 +582,7 @@ if __name__ == '__main__':
     parser.add_argument("-t", "--quick", type=bool, required=False,
                         help="True if you want to only train on first 1000 train,test samples")
     parser.add_argument("-d", "--debug", type=bool, required=False, help="True if you want a verbose run")
+    parser.add_argument("-sf", "--safemode", type=bool, required=False, help="True if you dont want to save anything")
     parser.add_argument("-m", "--message", type=str, required=False, help="Message to be saved alongwith traces", default=None)
     parser.add_argument("-p", "--pretrained", type=bool, required=False,
                         help="False if you don't want to load pretrained weights in LM")
@@ -589,6 +590,8 @@ if __name__ == '__main__':
     parse_args = vars(parser.parse_args())
     QUICK, DEBUG, PRETRAINED = parse_args['quick'], parse_args['debug'], parse_args['pretrained']
     MESSAGE = parse_args['message']
+    SAFE_MODE =  parse_args['safemode']
+
     params.message = MESSAGE
     params.quick = QUICK
 
@@ -770,7 +773,7 @@ if __name__ == '__main__':
     lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.SlantedTriangularLR)
 
     # Find places to save model
-    save_dir = mt_save_dir(PATH / 'models', _newdir=True)
+    save_dir = mt_save_dir(PATH / 'models', _newdir=True) if not SAFE_MODE else ''
 
     # Start to put permanent things there, like the itos
     mt_save(save_dir,
@@ -781,7 +784,7 @@ if __name__ == '__main__':
             'train_fn': lm, 'train_aux_fn': lm.domain, 'predict_fn': lm.predict, 'data_fn': data_fn, 'model': lm,
             'eval_fn': _eval, 'eval_aux_fn': _eval, 'batch_start_hook': partial(mtlp.reset_hidden, lm),
             'clip_grads_at': params.clip_grads_at, 'lr_schedule': lr_schedule, 'loss_aux_scale': params.loss_scale,
-            'save_dir': save_dir, 'save_best': True, 'save_params': params}
+            'save_dir': save_dir, 'save_best': not SAFE_MODE, 'save_params': params}
 
     '''
         Actual training
@@ -814,10 +817,11 @@ if __name__ == '__main__':
 
     # Final save, just in case
     # Dumping stuff
-    mt_save(save_dir, message=MESSAGE,
-            torch_stuff=[tosave('unsup_model_final.torch', lm.state_dict()),
-                         tosave('unsup_model_enc_final.torch', lm.encoder.state_dict())],
-            pickle_stuff=[tosave('final_unsup_traces.pkl', traces), tosave('unsup_options.pkl', params)])
+    if not SAFE_MODE:
+        mt_save(save_dir, message=MESSAGE,
+                torch_stuff=[tosave('unsup_model_final.torch', lm.state_dict()),
+                             tosave('unsup_model_enc_final.torch', lm.encoder.state_dict())],
+                pickle_stuff=[tosave('final_unsup_traces.pkl', traces), tosave('unsup_options.pkl', params)])
 
     # Interpreting Traces
     trn_best = np.max(traces[0])

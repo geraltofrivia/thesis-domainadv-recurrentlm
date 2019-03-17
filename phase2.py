@@ -178,10 +178,12 @@ if __name__ == "__main__":
     parser.add_argument("-t", "--quick", type=bool, required=False,
                         help="True if you want to only train on first 1000 train,test samples")
     parser.add_argument("-d", "--debug", type=bool, required=False, help="True if you want a verbose run")
+    parser.add_argument("-s", "--safemode", type=bool, required=False, help="True if you dont want to save the model")
     parser.add_argument("-m", "--message", type=str, required=False, help="Message to be saved alongwith traces", default=None)
     parser.add_argument("-", "--pretrained", type=bool, required=False, help="False if you dont want to load pretrained weights of LM")
     parse_args = vars(parser.parse_args())
     QUICK, DEBUG, MESSAGE = parse_args['quick'], parse_args['debug'], parse_args['message']
+    SAFE_MODE = parse_args['safemode']
     PRETRAINED = False
     params.quick = QUICK
 
@@ -347,15 +349,19 @@ if __name__ == "__main__":
     # Find places to save model
     save_dir = mt_save_dir(PATH / 'models', _newdir=True)
 
-    # Start to put permanent things there, like the itos
-    mt_save(save_dir,
-            pickle_stuff=[tosave('itos.pkl', itos)])
+    if not SAFE_MODE:
+        # Start to put permanent things there, like the itos
+        mt_save(save_dir,
+                pickle_stuff=[tosave('itos.pkl', itos)])
+
+    save_args = {'torch_stuff': [tosave('unsup_model.torch', lm.state_dict()), tosave('unsup_model_enc.torch', lm.encoder.state_dict())]}
 
     args = {'epochs': 1, 'weight_decay': params.weight_decay, 'data': data,
             'device': device, 'opt': opt, 'loss_fn': loss_fn, 'train_fn': lm,
             'predict_fn': lm.predict, 'data_fn': data_fn, 'model': lm,
             'eval_fn': eval, 'epoch_start_hook': partial(loops.reset_hidden, lm),
-            'clip_grads_at': params.clip_grads_at, 'lr_schedule': lr_schedule}
+            'clip_grads_at': params.clip_grads_at, 'lr_schedule': lr_schedule,
+            'save': not SAFE_MODE, 'save_params': params, 'save_dir': save_dir, 'save_args': save_args}
     traces_start = loops.generic_loop(**args)
 
     # Now unfreeze all layers and apply discr
@@ -379,9 +385,10 @@ if __name__ == "__main__":
 
     # Final save, just in case
     # Dumping stuff
-    mt_save(save_dir, message=MESSAGE,
-            torch_stuff=[tosave('unsup_model_enc_final.torch', lm.encoder.state_dict()), tosave('unsup_model_final.torch', lm.state_dict())],
-            pickle_stuff=[tosave('final_unsup_traces.pkl', traces), tosave('unsup_options.pkl', params)])
+    if not SAFE_MODE:
+        mt_save(save_dir, message=MESSAGE,
+                torch_stuff=[tosave('unsup_model_enc_final.torch', lm.encoder.state_dict()), tosave('unsup_model_final.torch', lm.state_dict())],
+                pickle_stuff=[tosave('final_unsup_traces.pkl', traces), tosave('unsup_options.pkl', params)])
 
 
 
