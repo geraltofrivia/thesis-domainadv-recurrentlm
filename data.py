@@ -24,7 +24,7 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from fastai import text, core, lm_rnn
-from typing import List, Callable, Optional
+from typing import List, Callable, Optional, Union
 
 from mytorch.utils.goodies import *
 
@@ -41,6 +41,7 @@ WIKI_DATA_PATH = Path('raw/wikitext/wikitext-103/')
 WIKI_DATA_PATH.mkdir(exist_ok=True)
 IMDB_DATA_PATH = Path('raw/imdb/aclImdb/')
 IMDB_DATA_PATH.mkdir(exist_ok=True)
+YELP_DATA_PATH = Path('./raw/yelp/review.json')
 
 
 class DataPuller:
@@ -141,29 +142,30 @@ class DataPuller:
         else:
             return trn_texts, val_texts, self.itos.copy()
 
-    def _imdb_(self)->(List[str], List[str], List[str], List[str]):
+    def _imdb_(self)->(List[str], List[int], List[str], List[int]):
         """ Pulls imdb data from disk, tokenize and return."""
         trn_texts, trn_lbl = self.__imdb_pull_from_disk__(IMDB_DATA_PATH / 'train')
         val_texts, val_lbl = self.__imdb_pull_from_disk__(IMDB_DATA_PATH / 'test')
 
-        if self.debug:
-            print(len(trn_texts), len(val_texts))
-
-        col_names = ['labels', 'text']
-        df_trn = pd.DataFrame({'text': trn_texts, 'labels': trn_lbl}, columns=col_names)
-        df_val = pd.DataFrame({'text': val_texts, 'labels': val_lbl}, columns=col_names)
-        trn_tok, trn_lbl = self._apply_fixup_(df_trn)
-        val_tok, val_lbl = self._apply_fixup_(df_val)
-
-        # Tokenize text
-        trn_tok, val_tok = self.__tokenize__(trn_tok), self.__tokenize__(val_tok)
-
-        return trn_tok, trn_lbl, val_tok, val_lbl
+        return self.__common_preprocessing_(trn_texts, trn_lbl, val_texts, val_lbl)
 
     def _yelp_(self):
-        pass
+        """ Converts 5 star rating into a binary setting (see https://arxiv.org/abs/1801.06146) """
+        data = pd.read_json(YELP_DATA_PATH, lines=True)
+        texts = data.text.values
+        labels = [1 if above else 0 for above in (data.stars > 2).values]
 
-    def _wikitext_(self)->(List[str], List[str], List[str], List[str]):
+        # To make train, test split (80-20), we set seed at 42 and go to town
+        np.random.seed(42)
+        idx = np.random.permutation(len(data))
+        trn_idx, val_idx = idx[:idx.shape[0]*0.8], idx[idx.shape[0]*0.8:]
+
+        trn_texts, trn_lbl = [texts[i] for i in trn_idx], [labels[i] for i in trn_idx]
+        val_texts, val_lbl = [texts[i] for i in val_idx], [labels[i] for i in val_idx]
+
+        return self.__common_preprocessing_(trn_texts, trn_lbl, val_texts, val_lbl)
+
+    def _wikitext_(self)->(List[str], List[int], List[str], List[int]):
         """ Adds validation set to train """
         trn_texts, val_texts, tst_texts = self.__wiki_pull_from_disk__(WIKI_DATA_PATH)
 
@@ -179,6 +181,12 @@ class DataPuller:
         trn_lbl = [0 for _ in trn_texts]
         val_lbl = [0 for _ in val_texts]
 
+        return self.__common_preprocessing_(trn_texts, trn_lbl, val_texts, val_lbl)
+
+    def __common_preprocessing_(self, trn_texts: Union[List[str], np.ndarray], trn_lbl: Union[List[int], np.ndarray],
+                                val_texts: Union[List[str], np.ndarray], val_lbl: Union[List[int], np.ndarray]) \
+            -> (List[str], List[int], List[str], List[int]):
+        """ After a point, all datasets need a common preprocessing (fixup etc), we do them here. """
         if self.debug:
             print(len(trn_texts), len(val_texts))
 
@@ -225,7 +233,7 @@ class DataPuller:
                     self.stoi[word] = len(self.itos)
                     self.itos.append(word)
 
-    def _vocabularize_(self, texts: List[list])->List[np.array]:
+    def _vocabularize_(self, texts: List[list]) -> List[np.array]:
         """
 
         :param texts: Expects a list like [trn_texts, val_texts] where each is a 2D (list of list) object
@@ -248,18 +256,18 @@ class DataPuller:
         return re1.sub(' ', html.unescape(x))
 
     @staticmethod
-    def __tokenize__(texts:list):
+    def __tokenize__(texts: list):
         """ Uses fastai.text's tokenizer. Expects a simple list."""
         return text.Tokenizer().proc_all_mp(core.partition_by_cores(texts))
 
-    def _apply_fixup_(self, df):
+    def _apply_fixup_(self, df: pd.DataFrame):
         labels = df.labels.values
         texts = f'\n{BOS} {FLD} 1 ' + df.text
         texts = list(texts.apply(self.__fixup__).values)
         return texts, list(labels)
 
     @staticmethod
-    def __imdb_pull_from_disk__(path):
+    def __imdb_pull_from_disk__(path: Path):
         texts, labels = [], []
         for idx, label in enumerate(['neg', 'pos', 'unsup']):
             for fname in (path / label).glob('*.*'):
@@ -267,7 +275,7 @@ class DataPuller:
                 labels.append(idx)
         return np.array(texts), np.array(labels)
 
-    def __wiki_pull_from_disk__(self, path):
+    def __wiki_pull_from_disk__(self, path: Path):
         texts = []
         for idx, label in enumerate(WIKI_CLASSES):
             with open(path / label, encoding='utf-8') as f:
