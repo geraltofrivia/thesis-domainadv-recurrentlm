@@ -134,7 +134,8 @@ class DataPuller:
         self._prepare_vocab_(trn_texts, merge_vocab if len(self.processed) > 0 else -1)
         trn_texts, val_texts = self._vocabularize_([trn_texts, val_texts])
 
-        # Finally, return elements depending on `supervised` label
+        # Finally, return elements depending on `supervised` label | And log what we just accomplished
+        self.processed.append(src)
         if supervised:
             return trn_texts, trn_labels, val_texts, val_labels, self.itos.copy()
         else:
@@ -165,6 +166,9 @@ class DataPuller:
     def _wikitext_(self)->(List[str], List[str], List[str], List[str]):
         """ Adds validation set to train """
         trn_texts, val_texts, tst_texts = self.__wiki_pull_from_disk__(WIKI_DATA_PATH)
+
+        if self.debug:
+            print(f"Pulling Wikidata from disk with {len(trn_texts)} train, {len(val_texts)} valid and {len(tst_texts)} test samples")
 
         # trn <- val + trn
         trn_texts = np.concatenate([trn_texts, val_texts])
@@ -218,8 +222,8 @@ class DataPuller:
                     break
 
                 if word not in self.stoi.keys():
+                    self.stoi[word] = len(self.itos)
                     self.itos.append(word)
-                    self.stoi[word] = len(self.stoi)
 
     def _vocabularize_(self, texts: List[list])->List[np.array]:
         """
