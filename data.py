@@ -78,7 +78,7 @@ class DataPuller:
         self.processed = []
         self.itos, self.stoi = [], {}
 
-    def get(self, src, supervised: bool, trim=False, merge_vocab: int = 0) \
+    def get(self, src, supervised: bool = True, trim: bool = False, merge_vocab: int = 0) \
             -> (List[np.ndarray], Optional[List[np.ndarray]], List[np.ndarray], Optional[List[np.ndarray]], List[str]):
         """
             Use this function to pull some dataset from disk
@@ -114,11 +114,11 @@ class DataPuller:
         val_idx = np.random.permutation(len(val_texts))
 
         if trim:
-            trn_idx = trn_idx[self.trim_trn]
-            val_idx = val_idx[self.trim_val]
+            trn_idx = trn_idx[:self.trim_trn]
+            val_idx = val_idx[:self.trim_val]
 
-        trn_texts, trn_labels = trn_texts[trn_idx], trn_labels[trn_idx]
-        val_texts, val_labels = val_texts[val_idx], val_labels[val_idx]
+        trn_texts, trn_labels = [trn_texts[i] for i in trn_idx], [trn_labels[i] for i in trn_idx]
+        val_texts, val_labels = [val_texts[i] for i in val_idx], [val_labels[i] for i in val_idx]
 
         """
             Vocabulary preparation.
@@ -149,8 +149,8 @@ class DataPuller:
             print(len(trn_texts), len(val_texts))
 
         col_names = ['labels', 'text']
-        df_trn = pd.DataFrame({'text': trn_texts, 'labels': [0] * len(trn_texts)}, columns=col_names)
-        df_val = pd.DataFrame({'text': val_texts, 'labels': [0] * len(val_texts)}, columns=col_names)
+        df_trn = pd.DataFrame({'text': trn_texts, 'labels': trn_lbl}, columns=col_names)
+        df_val = pd.DataFrame({'text': val_texts, 'labels': val_lbl}, columns=col_names)
         trn_tok, trn_lbl = self._apply_fixup_(df_trn)
         val_tok, val_lbl = self._apply_fixup_(df_val)
 
@@ -163,14 +163,31 @@ class DataPuller:
         pass
 
     def _wikitext_(self)->(List[str], List[str], List[str], List[str]):
-        """
-            Will add validation set to train for our purposes
-        :return:
-        """
+        """ Adds validation set to train """
         trn_texts, val_texts, tst_texts = self.__wiki_pull_from_disk__(WIKI_DATA_PATH)
+
+        # trn <- val + trn
+        trn_texts = np.concatenate([trn_texts, val_texts])
+
+        # For code consistency's sake, we refer to tst as val here on
+        val_texts = tst_texts
+
+        trn_lbl = [0 for _ in trn_texts]
+        val_lbl = [0 for _ in val_texts]
 
         if self.debug:
             print(len(trn_texts), len(val_texts))
+
+        col_names = ['labels', 'text']
+        df_trn = pd.DataFrame({'text': trn_texts, 'labels': trn_lbl}, columns=col_names)
+        df_val = pd.DataFrame({'text': val_texts, 'labels': val_lbl}, columns=col_names)
+        trn_tok, trn_lbl = self._apply_fixup_(df_trn)
+        val_tok, val_lbl = self._apply_fixup_(df_val)
+
+        # Tokenize text
+        trn_tok, val_tok = self.__tokenize__(trn_tok), self.__tokenize__(val_tok)
+
+        return trn_tok, trn_lbl, val_tok, val_lbl
 
     def _prepare_vocab_(self, source: list, merge_vocab: int = -1)->None:
         """
@@ -246,12 +263,11 @@ class DataPuller:
                 labels.append(idx)
         return np.array(texts), np.array(labels)
 
-    @staticmethod
-    def __wiki_pull_from_disk__(path):
+    def __wiki_pull_from_disk__(self, path):
         texts = []
         for idx, label in enumerate(WIKI_CLASSES):
             with open(path / label, encoding='utf-8') as f:
-                texts.append([sent.strip() for sent in f.readlines() if is_valid_sent(sent)])
+                texts.append([sent.strip() for sent in f.readlines() if self.__is_valid_sent__(sent)])
         return tuple(texts)
 
     @staticmethod
