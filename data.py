@@ -34,7 +34,7 @@ WIKI_CLASSES = ['wiki.train.tokens', 'wiki.valid.tokens', 'wiki.test.tokens']
 
 WIKI_DATA_PATH = Path('./raw/wikitext/wikitext-103/')
 IMDB_DATA_PATH = Path('./raw/imdb/aclImdb/')
-YELP_DATA_PATH = Path('./raw/yelp/review.json')
+YELP_DATA_PATH = Path('./raw/yelp/')
 CACHED_PATH_TEMPLATE = "./resources/proc/%(src)s/cached"
 WIKI_DATA_PATH.mkdir(exist_ok=True)
 IMDB_DATA_PATH.mkdir(exist_ok=True)
@@ -184,7 +184,7 @@ class DataPuller:
 
     def _yelp_(self)->(List[str], List[int], List[str], List[int]):
         """ Converts 5 star rating into a binary setting (see https://arxiv.org/abs/1801.06146) """
-        data = pd.read_json(YELP_DATA_PATH, lines=True)
+        data = pd.read_json(YELP_DATA_PATH / 'review.json', lines=True)
         texts = data.text.values
         labels = [1 if above else 0 for above in (data.stars > 2).values]
 
