@@ -12,7 +12,8 @@ class Phase2:
     weight_decay = 0.0
     clip_grads_at = -1.0
     max_vocab_task = 60000
-    max_vocab_wiki = 0
+    max_vocab_wiki = 1000
+    min_vocab_freq = 2
 
     domclas_layers = [400*3, 50, 2]
     phase1=True

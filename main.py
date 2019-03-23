@@ -29,9 +29,10 @@ from mytorch import lriters as mtlr
 
 # Local imports
 import utils
+from data import DataPuller
 from options import Phase2 as params
 
-DEVICE = 'cuda:0'
+DEVICE = 'cuda:2'
 
 
 device = torch.device(DEVICE)
@@ -39,13 +40,6 @@ np.random.seed(42)
 torch.manual_seed(42)
 
 # Path fields
-BOS = 'xbos'  # beginning-of-sentence tag
-FLD = 'xfld'  # data field tag
-
-WIKI_DATA_PATH = Path('raw/wikitext/wikitext-103/')
-WIKI_DATA_PATH.mkdir(exist_ok=True)
-IMDB_DATA_PATH = Path('raw/imdb/aclImdb/')
-IMDB_DATA_PATH.mkdir(exist_ok=True)
 PATH = Path('resources/proc/imdb')
 DATA_PROC_PATH = PATH / 'data'
 DATA_LM_PATH = PATH / 'datalm'
@@ -54,9 +48,6 @@ LM_PATH = Path('resources/models')
 LM_PATH.mkdir(exist_ok=True)
 PRE_PATH = LM_PATH / 'wt103'
 PRE_LM_PATH = PRE_PATH / 'fwd_wt103.h5'
-CLASSES = ['neg', 'pos', 'unsup']
-WIKI_CLASSES = ['wiki.train.tokens', 'wiki.valid.tokens', 'wiki.test.tokens']
-
 
 '''
     Data sampler for this training
@@ -126,76 +117,6 @@ class DomainAgnosticSampler:
         y = y.transpose(1, 0).reshape(np.prod(y.shape))
 
         return x, y, y_dom
-
-
-'''
-    Data Functions
-'''
-
-
-def get_texts_org(path):
-    texts, labels = [], []
-    for idx, label in enumerate(CLASSES):
-        for fname in (path / label).glob('*.*'):
-            texts.append(fname.open('r', encoding='utf-8').read())
-            labels.append(idx)
-    return np.array(texts), np.array(labels)
-
-
-def is_valid_sent(x):
-    x = x.strip()
-    if len(x) == 0: return False
-    if x[0] == '=' and x[-1] == '=': return False
-    return True
-
-
-def wiki_get_texts_org(path):
-    texts = []
-    for idx, label in enumerate(WIKI_CLASSES):
-        with open(path / label, encoding='utf-8') as f:
-            texts.append([sent.strip() for sent in f.readlines() if is_valid_sent(sent)])
-    return tuple(texts)
-
-
-'''
-    Dataframe black magic functions
-'''
-
-
-def _fixup_(x):
-    x = x.replace('#39;', "'").replace('amp;', '&').replace('#146;', "'").replace(
-        'nbsp;', ' ').replace('#36;', '$').replace('\\n', "\n").replace('quot;', "'").replace(
-        '<br />', "\n").replace('\\"', '"').replace('<unk>', 'u_n').replace(' @.@ ', '.').replace(
-        ' @-@ ', '-').replace('\\', ' \\ ')
-    return re1.sub(' ', html.unescape(x))
-
-
-def _get_texts_(df, n_lbls=1):
-    labels = df.iloc[:, range(n_lbls)].values.astype(np.int64)
-    texts = f'\n{BOS} {FLD} 1 ' + df[n_lbls].astype(str)
-    for i in range(n_lbls + 1, len(df.columns)): texts += f' {FLD} {i - n_lbls} ' + df[i].astype(str)
-    texts = list(texts.apply(_fixup_).values)
-
-    tok = text.Tokenizer().proc_all_mp(core.partition_by_cores(texts))
-    return tok, list(labels)
-
-
-def _simple_apply_fixup_(df):
-    labels = [0] * df.shape[0]
-    texts = f'\n{BOS} {FLD} 1 ' + df.text
-    texts = list(texts.apply(_fixup_).values)
-    tok = text.Tokenizer().proc_all_mp(core.partition_by_cores(texts))
-    return tok, list(labels)
-
-
-def get_all(df, n_lbls):
-    tok, labels = [], []
-    for i, r in enumerate(df):
-        print(i)
-        tok_, labels_ = _get_texts_(r, n_lbls)
-        tok += tok_;
-        labels += labels_
-    return tok, labels
 
 
 '''
@@ -571,7 +492,11 @@ def generic_loop(epochs: int,
             saved_info['directory'] = save_dir
 
     if notify:
-        send_notification(data=saved_info, key=notify_key)
+        if not saved_info:
+            message_template = "Your model is done training."
+            send_notification(data=saved_info, key=notify_key, message_template=message_template)
+        else:
+            send_notification(data=saved_info, key=notify_key)
 
     return train_acc_main, val_acc, train_acc_aux, train_loss_main, train_loss_aux, lrs
 
@@ -595,123 +520,17 @@ if __name__ == '__main__':
     params.message = MESSAGE
     params.quick = QUICK
 
-    '''
-        Start making data
-    '''
-    trn_texts, trn_labels = get_texts_org(IMDB_DATA_PATH / 'train')
-    val_texts, val_labels = get_texts_org(IMDB_DATA_PATH / 'test')
-    col_names = ['labels', 'text']
-    print(len(trn_texts), len(val_texts))
-
-    wiki_trn_texts, wiki_val_texts, wiki_tst_texts = wiki_get_texts_org(WIKI_DATA_PATH)
-    print(len(wiki_trn_texts), len(wiki_val_texts))
-
-    '''
-        Crop data
-    '''
-    if params.quick:
-        trn_texts, val_texts = trn_texts[:1000], val_texts[:1000]
-        wiki_trn_texts, wiki_val_texts, wiki_tst_texts = wiki_trn_texts[:1000], wiki_val_texts[:1000], wiki_tst_texts[:1000]
-
-    '''
-        Shuffle data
-    '''
-    trn_idx = np.random.permutation(len(trn_texts))
-    val_idx = np.random.permutation(len(val_texts))
-
-    trn_texts, trn_labels = trn_texts[trn_idx], trn_labels[trn_idx]
-    val_texts, val_labels = val_texts[val_idx], val_labels[val_idx]
-
-    np.random.shuffle(wiki_trn_texts)
-    np.random.shuffle(wiki_val_texts)
-    np.random.shuffle(wiki_tst_texts)
-
-    wiki_trn_labels = [0 for _ in wiki_trn_texts]
-    wiki_val_labels = [0 for _ in wiki_val_texts]
-    wiki_tst_labels = [0 for _ in wiki_val_texts]
-
-    '''
-        Dataframe black magic
-    '''
-    chunksize = 24000
-    re1 = re.compile(r'  +')
-
-    trn_texts, val_texts = sklearn.model_selection.train_test_split(
-        np.concatenate([trn_texts, val_texts]), test_size=0.1)
-
     if DEBUG:
-        print(len(trn_texts), len(val_texts))
+        print("Pulling data from disk")
 
-    df_trn = pd.DataFrame({'text': trn_texts, 'labels': [0] * len(trn_texts)}, columns=col_names)
-    df_val = pd.DataFrame({'text': val_texts, 'labels': [0] * len(val_texts)}, columns=col_names)
-
-    trn_tok, trn_labels = _simple_apply_fixup_(df_trn)
-    val_tok, val_labels = _simple_apply_fixup_(df_val)
-
-    if DEBUG:
-        print(f"Trn: {len(trn_tok), len(trn_labels)}, Val: {len(val_tok), len(val_labels)} ")
-
-    wiki_trn_texts, wiki_val_texts = sklearn.model_selection.train_test_split(
-        np.concatenate([wiki_trn_texts, wiki_val_texts, wiki_tst_texts]), test_size=0.1)
-
-    if DEBUG:
-        print(len(wiki_trn_texts), len(wiki_val_texts))
-
-    wiki_df_trn = pd.DataFrame({'text': wiki_trn_texts, 'labels': [0] * len(wiki_trn_texts)}, columns=col_names)
-    wiki_df_val = pd.DataFrame({'text': wiki_val_texts, 'labels': [0] * len(wiki_val_texts)}, columns=col_names)
-
-    wiki_trn_tok, wiki_trn_labels = _simple_apply_fixup_(wiki_df_trn)
-    wiki_val_tok, wiki_val_labels = _simple_apply_fixup_(wiki_df_val)
-
-    if DEBUG:
-        print(f"Trn: {len(wiki_trn_tok), len(wiki_trn_labels)}, Val: {len(wiki_val_tok), len(wiki_val_labels)} ")
-
-    '''
-        Now we make vocabulary, select 60k most freq words 
-            **NOTE: NOT ANY MORE**: (we do this looking only at imdb, and ignore wiki here)
-    '''
-
-    freq = Counter(p for o in trn_tok for p in o)
-    # freq.most_common(25)
-    max_vocab = params.max_vocab_task
-    min_freq = 2
-
-    itos = [o for o, c in freq.most_common(max_vocab) if c > min_freq]
-    itos.insert(0, '_pad_')
-    itos.insert(0, '_unk_')
-    stoi = collections.defaultdict(lambda: 0, {v: k for k, v in enumerate(itos)})
-
-    # This block here also takes words from wiki while making vocabulary.
-    wiki_freq = Counter(p for o in wiki_trn_tok for p in o)
-    # freq.most_common(25)
-    wiki_max_vocab = params.max_vocab_wiki
-    wiki_most_common_words = wiki_freq.sorted()
-
-    for word, count in wiki_most_common_words:
-        if len(itos) >= max_vocab + wiki_max_vocab:
-            break
-
-        if word not in stoi.keys():
-            itos.append(word)
-            stoi[word] = len(stoi)
-
+    # Pulling data from disk
+    data_puller = DataPuller(debug=False, max_vocab=params.max_vocab_task, min_freq=params.min_vocab_freq, trim_trn=1000, trim_val=-1)
+    trn_lm, val_lm, _ = data_puller.get('imdb', supervised=False, trim=params.quick)
+    wiki_trn_lm, wiki_val_lm, itos = data_puller.get('wikitext', supervised=False, trim=params.quick, merge_vocab=params.max_vocab_wiki)
     vs = len(itos)
-    trn_lm = np.array([[stoi[o] for o in p] for p in trn_tok])
-    val_lm = np.array([[stoi[o] for o in p] for p in val_tok])
-
-    if DEBUG:
-        print(f"ITOS: {len(itos)}, STOI: {len(stoi)}")
-
-    wiki_trn_lm = np.array([[stoi[o] for o in p] for p in wiki_trn_tok])
-    wiki_val_lm = np.array([[stoi[o] for o in p] for p in wiki_val_tok])
-
-    if DEBUG:
-        print(f"ITOS: {len(itos)}, STOI: {len(stoi)}")
 
     """
-        Now we pull pretrained models from disk
-    
-        TODO: Check this block
+        Now we pull pretrained models from disk    
     """
     em_sz, nh, nl = 400, 1150, 3
     # PRE_PATH = PATH / 'models' / 'wt103'
@@ -726,8 +545,11 @@ if __name__ == '__main__':
         r = stoi2[w]
         new_w[i] = enc_wgts[r] if r >= 0 else row_m
 
+    # noinspection PyCallingNonCallable
     wgts['0.encoder.weight'] = T(new_w)
+    # noinspection PyCallingNonCallable
     wgts['0.encoder_with_dropout.embed.weight'] = T(np.copy(new_w))
+    # noinspection PyCallingNonCallable
     wgts['1.decoder.weight'] = T(np.copy(new_w))
     wgts_enc = {'.'.join(k.split('.')[1:]): val
                 for k, val in wgts.items() if k[0] == '0'}
@@ -775,9 +597,10 @@ if __name__ == '__main__':
     # Find places to save model
     save_dir = mt_save_dir(PATH / 'models', _newdir=True) if not SAFE_MODE else ''
 
-    # Start to put permanent things there, like the itos
-    mt_save(save_dir,
-            pickle_stuff=[tosave('itos.pkl', itos)])
+    if not SAFE_MODE:
+        # Start to put permanent things there, like the itos
+        mt_save(save_dir,
+                pickle_stuff=[tosave('itos.pkl', itos)])
 
     args = {'epochs': 1, 'weight_decay': params.weight_decay, 'data_a': data_imdb, 'data_b': data_wiki,
             'device': device, 'opt': opt, 'loss_main_fn': loss_main_fn, 'loss_aux_fn': loss_aux_fn,
