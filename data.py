@@ -14,6 +14,9 @@
     3. Get IMDB data AND then yelp.
 
 """
+import os
+os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+
 import re
 import html
 import collections
@@ -75,7 +78,7 @@ class DataPuller:
         self.trim_val = trim_val if trim_val > 0 else None
 
         self.processed = []
-        self.itos, self.stoi = [], {}
+        self.itos, self.stoi = [], collections.defaultdict(lambda: 0, {})
 
     def get(self, src, supervised: bool = True, trim: bool = False, merge_vocab: int = 0, cached: bool = True) \
             -> (List[np.ndarray], Optional[List[np.ndarray]], List[np.ndarray], Optional[List[np.ndarray]], List[str]):
@@ -192,6 +195,11 @@ class DataPuller:
         trn_texts, trn_lbl = self.__trec_pull_from_disk__(TREC_DATA_PATH / 'train')
         val_texts, val_lbl = self.__trec_pull_from_disk__(TREC_DATA_PATH / 'test')
 
+        # # One hot encode trn_lbl
+        classes = {v: i for i, v in enumerate(np.unique(trn_lbl))}
+        trn_lbl = np.array([classes[label] for label in trn_lbl])
+        val_lbl = np.array([classes[label] for label in val_lbl])
+
         return self.__common_preprocessing_(trn_texts, trn_lbl, val_texts, val_lbl)
 
     def _yelp_(self)->(List[str], List[int], List[str], List[int]):
@@ -264,7 +272,7 @@ class DataPuller:
             itos.insert(0, '_pad_')
             itos.insert(0, '_unk_')
             stoi = collections.defaultdict(lambda: 0, {v: k for k, v in enumerate(itos)})
-            self.itos, self.stoi = itos, stoi
+            self.itos, self.stoi = itos.copy(), stoi.copy()
 
         else:
 
@@ -349,3 +357,10 @@ class DataPuller:
         if x[0] == '=' and x[-1] == '=':
             return False
         return True
+
+
+if __name__ == '__main__':
+
+    dd = DataPuller()
+    trn_tt, trn_ll, val_tt, val_ll, itos = dd.get('trec', supervised=True)
+    print(trn_ll.shape)

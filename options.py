@@ -32,6 +32,9 @@ class Phase3:
     adam_betas = (0.7, 0.99)
     clip_grads_at = 0.3
     weight_decay = 1e-7
+    max_vocab_task = 70000
+    max_vocab_wiki = 2000
+    min_vocab_freq = 2
 
 
 class _Phase2:

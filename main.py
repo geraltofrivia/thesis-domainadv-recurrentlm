@@ -1,26 +1,14 @@
+# noinspection PyShadowingNames
 # External Lib imports
-import os
-import re
-import html
-import argparse
 import collections
-from pathlib import Path
+from tqdm import tqdm
 from typing import Callable
 from functools import partial
 
-import pandas as pd
-import sklearn
-from tqdm import tqdm
-
-os.environ['QT_QPA_PLATFORM'] = 'offscreen'
-
-# FastAI Imports
-from fastai import text, core, lm_rnn
-
 # Torch imports
 import torch.nn as nn
-import torch.tensor as T
-import torch.nn.functional as F
+import torch.tensor as tensor
+import torch.nn.functional as func
 
 # Mytorch imports
 from mytorch import loops as mtlp
@@ -28,9 +16,14 @@ from mytorch.utils.goodies import *
 from mytorch import lriters as mtlr
 
 # Local imports
-import utils
 from data import DataPuller
-from options import Phase2 as params
+from options import Phase2 as Params
+
+os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+
+# FastAI Imports
+from fastai import text, core, lm_rnn
+
 
 DEVICE = 'cuda:2'
 KNOWN_DATASETS = ['imdb', 'wikitext']
@@ -43,6 +36,7 @@ torch.manual_seed(42)
 PATH = Path('resources/proc/imdb')
 DATA_PROC_PATH = PATH / 'data'
 DATA_LM_PATH = PATH / 'datalm'
+DUMP_PATH = Path('resources/models/runs')
 
 LM_PATH = Path('resources/models')
 LM_PATH.mkdir(exist_ok=True)
@@ -54,6 +48,7 @@ PRE_LM_PATH = PRE_PATH / 'fwd_wt103.h5'
 '''
 
 
+# noinspection PyShadowingNames
 class DomainAgnosticSampler:
     """ Sample data for language model training from two different domains in one batch. """
 
@@ -67,6 +62,7 @@ class DomainAgnosticSampler:
         """
         self.args = {'data_fn': data_fn, 'data_a': data_a, 'data_b': data_b}
         self.reset(**self.args)
+        self.itera, self.iterb = iter([]), iter([])
 
     def reset(self, data_fn, data_a, data_b):
         self.itera = iter(data_fn(data_a))
@@ -139,18 +135,19 @@ class CustomDecoder(text.LinearDecoder):
     def layers(self):
         return torch.nn.ModuleList([self.decoder, self.dropout])
 
-    def forward(self, input):
-        raw_outputs, outputs = input
+    def forward(self, x):
+        raw_outputs, outputs = x
         output = self.dropout(outputs[-1])
         decoded = self.decoder(output.view(output.size(0) * output.size(1), output.size(2)))
         result = decoded.view(-1, decoded.size(1))
         return result, raw_outputs, outputs
 
 
+# noinspection PyShadowingNames
 class CustomLinear(lm_rnn.PoolingLinearClassifier):
 
-    def forward(self, input):
-        raw_outputs, outputs = input
+    def forward(self, x):
+        raw_outputs, outputs = x
         output = outputs[-1]
         sl,bs,_ = output.size()
         avgpool = self.pool(output, bs, False)
@@ -159,7 +156,7 @@ class CustomLinear(lm_rnn.PoolingLinearClassifier):
         for i, l in enumerate(self.layers):
             l_x = l(x)
             if i != len(self.layers) -1:
-                x = F.relu(l_x)
+                x = func.relu(l_x)
             else:
                 x = torch.sigmoid(l_x)
         return l_x, raw_outputs, outputs
@@ -189,19 +186,12 @@ class LanguageModel(nn.Module):
         self.linear_dec = CustomDecoder(
             _encargs['ntoken'],
             n_hid=400,
-            dropout=params.decoder_drops,
+            dropout=Params.decoder_drops,
             tie_encoder=self.encoder.encoder,
             bias=False
         ).to(self.device)
 
-        # self.linear_dom = CustomLinear(
-        #     2,
-        #     n_hid=400,
-        #     dropout=0.1 * 0.7,
-        #     #             tie_encoder=self.encoder.encoder,
-        #     bias=False
-        # ).to(self.device)
-        self.linear_dom = CustomLinear(layers=params.domclas_layers, drops=params.domclas_drops).to(self.device)
+        self.linear_dom = CustomLinear(layers=Params.domclas_layers, drops=Params.domclas_drops).to(self.device)
         self.encoder.reset()
 
     def forward(self, x):
@@ -215,10 +205,6 @@ class LanguageModel(nn.Module):
 
     @property
     def layers(self):
-        # layers = [x for x in self.encoder.layers]
-        # layers.append(torch.nn.ModuleList([x for x in self.linear_dec.layers]))
-        # layers.append(torch.nn.ModuleList([x for x in self.linear_dom.layers]))
-        # return torch.nn.ModuleList(layers)
         return self.encoder.layers.extend(self.linear_dec.layers).extend(self.linear_dom.layers)
 
     def predict(self, x):
@@ -254,6 +240,9 @@ def _eval(y_pred, y_true):
         - sample from imdb
             - same...
 '''
+
+
+# noinspection PyShadowingNames
 def generic_loop(epochs: int,
                  device: torch.device,
                  opt: torch.optim,
@@ -277,8 +266,8 @@ def generic_loop(epochs: int,
                  epoch_end_hook: Callable = None,
                  batch_start_hook: Callable = None,
                  batch_end_hook: Callable = None,
-                 weight_decay: float = params.weight_decay,
-                 clip_grads_at: float = params.clip_grads_at,
+                 weight_decay: float = Params.weight_decay,
+                 clip_grads_at: float = Params.clip_grads_at,
                  lr_schedule = None,
                  eval_fn: Callable = None,
                  eval_aux_fn: Callable = None,
@@ -368,7 +357,9 @@ def generic_loop(epochs: int,
 
             for x, y, y_aux in tqdm(trn_dl):
 
-                if batch_start_hook: batch_start_hook()
+                if batch_start_hook:
+                    batch_start_hook()
+
                 opt.zero_grad()
 
                 if lr_schedule: lrs.append(update_lr(opt, lr_schedule.get()))
@@ -406,9 +397,11 @@ def generic_loop(epochs: int,
                         param.data = param.data.add(-weight_decay * group['lr'], param.data)
 
                 opt.step()
-                if batch_end_hook: batch_end_hook()
+                if batch_end_hook:
+                    batch_end_hook()
 
-            if epoch_end_hook: epoch_end_hook()
+            if epoch_end_hook:
+                epoch_end_hook()
 
         # Val
         with torch.no_grad():
@@ -529,16 +522,16 @@ if __name__ == '__main__':
     for dataset in DATASETS:
         assert dataset in KNOWN_DATASETS, f"Couldn't find a dataset called {dataset}. Exiting."
 
-    params.message = MESSAGE
-    params.quick = QUICK
+    Params.message = MESSAGE
+    Params.quick = QUICK
 
     if DEBUG:
         print("Pulling data from disk")
 
     # Pulling data from disk
-    data_puller = DataPuller(debug=False, max_vocab=params.max_vocab_task, min_freq=params.min_vocab_freq, trim_trn=1000, trim_val=-1)
-    trn_lm, val_lm, _ = data_puller.get('imdb', supervised=False, trim=params.quick)
-    wiki_trn_lm, wiki_val_lm, itos = data_puller.get('wikitext', supervised=False, trim=params.quick, merge_vocab=params.max_vocab_wiki)
+    data_puller = DataPuller(debug=False, max_vocab=Params.max_vocab_task, min_freq=Params.min_vocab_freq, trim_trn=1000, trim_val=-1)
+    trn_lm, val_lm, _ = data_puller.get('imdb', supervised=False, trim=Params.quick)
+    wiki_trn_lm, wiki_val_lm, itos = data_puller.get('wikitext', supervised=False, trim=Params.quick, merge_vocab=Params.max_vocab_wiki)
     vs = len(itos)
 
     """
@@ -562,11 +555,11 @@ if __name__ == '__main__':
         new_w[i] = enc_wgts[r] if r >= 0 else row_m
 
     # noinspection PyCallingNonCallable
-    wgts['0.encoder.weight'] = T(new_w)
+    wgts['0.encoder.weight'] = tensor(new_w)
     # noinspection PyCallingNonCallable
-    wgts['0.encoder_with_dropout.embed.weight'] = T(np.copy(new_w))
+    wgts['0.encoder_with_dropout.embed.weight'] = tensor(np.copy(new_w))
     # noinspection PyCallingNonCallable
-    wgts['1.decoder.weight'] = T(np.copy(new_w))
+    wgts['1.decoder.weight'] = tensor(np.copy(new_w))
     wgts_enc = {'.'.join(k.split('.')[1:]): val
                 for k, val in wgts.items() if k[0] == '0'}
     wgts_dec = {'.'.join(k.split('.')[1:]): val
@@ -576,12 +569,12 @@ if __name__ == '__main__':
         Setting up things for training.
     '''
     bptt = 70
-    bs = params.bs
-    opt_fn = partial(torch.optim.SGD)  # , betas=params.adam_betas)  # @TODO: find real optimizer, and params
+    bs = Params.bs
+    opt_fn = partial(torch.optim.SGD)  # , betas=params.adam_betas)
 
     # Load the pre-trained model
     parameter_dict = {'itos2': itos2}
-    dps = params.encoder_drops
+    dps = Params.encoder_drops
     encargs = {'ntoken': new_w.shape[0],
                'emb_sz': 400, 'n_hid': 1150,
                'n_layers': 3, 'pad_token': 0,
@@ -589,9 +582,9 @@ if __name__ == '__main__':
                'wdrop': dps[2], 'dropoute': dps[3], 'dropouth': dps[4]}
 
     lm = LanguageModel(parameter_dict, device, _wgts_e=wgts_enc if PRETRAINED else None, _wgts_d=wgts_dec, _encargs=encargs)
-    opt = make_opt(lm, opt_fn, lr=params.lr.init)
-    loss_main_fn = F.cross_entropy
-    loss_aux_fn = F.cross_entropy
+    opt = make_opt(lm, opt_fn, lr=Params.lr.init)
+    loss_main_fn = func.cross_entropy
+    loss_aux_fn = func.cross_entropy
 
     # Make data
     data_fn_unidomain = partial(text.LanguageModelLoader, bs=bs, bptt=bptt)
@@ -602,28 +595,28 @@ if __name__ == '__main__':
     # Set up lr and freeze stuff
     for grp in opt.param_groups:
         grp['lr'] = 0.0
-    opt.param_groups[3]['lr'] = params.lr.init
-    opt.param_groups[4]['lr'] = params.lr.init
+    opt.param_groups[3]['lr'] = Params.lr.init
+    opt.param_groups[4]['lr'] = Params.lr.init
 
     # lr_args = {'batches':, 'cycles': 1}
     lr_args = {'iterations': len(data_fn(data_a=data_wiki['train'], data_b=data_imdb['train'])),
-               'cut_frac': params.lr.sltr_cutfrac, 'ratio': params.lr.sltr_ratio}
+               'cut_frac': Params.lr.sltr_cutfrac, 'ratio': Params.lr.sltr_ratio}
     lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.SlantedTriangularLR)
 
     # Find places to save model
-    save_dir = mt_save_dir(PATH / 'models', _newdir=True) if not SAFE_MODE else ''
+    save_dir = mt_save_dir(DUMP_PATH / 'models', _newdir=True) if not SAFE_MODE else ''
 
     if not SAFE_MODE:
         # Start to put permanent things there, like the itos
         mt_save(save_dir,
                 pickle_stuff=[tosave('itos.pkl', itos)])
 
-    args = {'epochs': 1, 'weight_decay': params.weight_decay, 'data_a': data_imdb, 'data_b': data_wiki,
+    args = {'epochs': 1, 'weight_decay': Params.weight_decay, 'data_a': data_imdb, 'data_b': data_wiki,
             'device': device, 'opt': opt, 'loss_main_fn': loss_main_fn, 'loss_aux_fn': loss_aux_fn,
             'train_fn': lm, 'train_aux_fn': lm.domain, 'predict_fn': lm.predict, 'data_fn': data_fn, 'model': lm,
             'eval_fn': _eval, 'eval_aux_fn': _eval, 'batch_start_hook': partial(mtlp.reset_hidden, lm),
-            'clip_grads_at': params.clip_grads_at, 'lr_schedule': lr_schedule, 'loss_aux_scale': params.loss_scale,
-            'save_dir': save_dir, 'save_best': not SAFE_MODE, 'save_params': params}
+            'clip_grads_at': Params.clip_grads_at, 'lr_schedule': lr_schedule, 'loss_aux_scale': Params.loss_scale,
+            'save_dir': save_dir, 'save_best': not SAFE_MODE, 'save_params': Params}
 
     '''
         Actual training
@@ -633,16 +626,16 @@ if __name__ == '__main__':
 
     # Now unfreeze all layers and apply discr
     for grp in opt.param_groups:
-        grp['lr'] = params.lr.init
+        grp['lr'] = Params.lr.init
 
-    lr_dscr = lambda opt, lr, fctr=params.lr.dscr: [lr / (fctr ** i) for i in range(len(opt.param_groups))[::-1]]
-    update_lr(opt, lr_dscr(opt, params.lr.init))
+    lr_dscr = lambda optim, lr, fctr=Params.lr.dscr: [lr / (fctr ** p_grp) for p_grp in range(len(optim.param_groups))[::-1]]
+    update_lr(opt, lr_dscr(opt, Params.lr.init))
 
     if DEBUG:
         print([x['lr'] for x in opt.param_groups])
 
     lr_args = {'iterations': len(data_fn(data_a=data_wiki['train'], data_b=data_imdb['train'])) * 15,
-               'cut_frac': params.lr.sltr_cutfrac, 'ratio': params.lr.sltr_ratio}
+               'cut_frac': Params.lr.sltr_cutfrac, 'ratio': Params.lr.sltr_ratio}
     lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.SlantedTriangularLR)
     args['save_above_trn'] = np.max(traces_start[0])
     # args['save_above_aux'] = np.min(traces_start[2][2:])  # Not updating this var since we ignore the DANN acc of the first few epochs anyway
@@ -654,13 +647,12 @@ if __name__ == '__main__':
     traces_main = generic_loop(**args)
     traces = [a + b for a, b in zip(traces_start, traces_main)]
 
-    # Final save, just in case
     # Dumping stuff
     if not SAFE_MODE:
         mt_save(save_dir, message=MESSAGE,
                 torch_stuff=[tosave('unsup_model_final.torch', lm.state_dict()),
                              tosave('unsup_model_enc_final.torch', lm.encoder.state_dict())],
-                pickle_stuff=[tosave('final_unsup_traces.pkl', traces), tosave('unsup_options.pkl', params)])
+                pickle_stuff=[tosave('final_unsup_traces.pkl', traces), tosave('unsup_options.pkl', Params)])
 
     # Interpreting Traces
     trn_best = np.max(traces[0])

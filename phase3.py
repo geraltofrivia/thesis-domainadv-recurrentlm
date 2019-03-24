@@ -7,18 +7,13 @@
 
 # External Lib imports
 import os
-import re
-import html
-import pickle
-import argparse
 import pandas as pd
-from pathlib import Path
 from functools import partial
 
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 
 # FastAI Imports
-from fastai import text, core, lm_rnn
+from fastai import text, lm_rnn
 
 # Torch imports
 import torch.nn as nn
@@ -29,6 +24,7 @@ from mytorch import loops, lriters as mtlr, dataiters as mtdi
 from mytorch.utils.goodies import *
 
 # Local imports
+from data import DataPuller
 from options import Phase3 as params
 
 device = torch.device('cuda')
@@ -38,12 +34,6 @@ torch.manual_seed(42)
 '''
     Paths and macros
 '''
-# Path fields
-BOS = 'xbos'  # beginning-of-sentence tag
-FLD = 'xfld'  # data field tag
-
-DATA_PATH = Path('raw/imdb/aclImdb/')
-DATA_PATH.mkdir(exist_ok=True)
 PATH = Path('resources/proc/imdb')
 DATA_PROC_PATH = PATH / 'data'
 DATA_LM_PATH = PATH / 'datalm'
@@ -52,7 +42,6 @@ LM_PATH = Path('resources/models')
 LM_PATH.mkdir(exist_ok=True)
 PRE_PATH = LM_PATH / 'wt103'
 PRE_LM_PATH = PRE_PATH / 'fwd_wt103.h5'
-CLASSES = ['neg', 'pos', 'unsup']
 
 
 '''
@@ -133,48 +122,12 @@ class TextClassifier(nn.Module):
             return predicted
 
 
-'''
-    Prepare data
-'''
-re1 = re.compile(r'  +')
-
-
-def fixup(x):
-    x = x.replace('#39;', "'").replace('amp;', '&').replace('#146;', "'").replace(
-        'nbsp;', ' ').replace('#36;', '$').replace('\\n', "\n").replace('quot;', "'").replace(
-        '<br />', "\n").replace('\\"', '"').replace('<unk>', 'u_n').replace(' @.@ ', '.').replace(
-        ' @-@ ', '-').replace('\\', ' \\ ')
-    return re1.sub(' ', html.unescape(x))
-
-
-def get_texts(df, n_lbls=1):
-    labels = df.iloc[:, range(n_lbls)].values.astype(np.int64)
-    texts = f'\n{BOS} {FLD} 1 ' + df.iloc[:, 1].astype(str)
-    texts = list(texts.apply(fixup).values)
-
-    tok = text.Tokenizer().proc_all_mp(core.partition_by_cores(texts))
-    return tok, list(labels)
-
-
-def get_all(df, n_lbls):
-    tok, labels = get_texts(df)
-    return tok, labels
-
-
-def get_texts_org(path):
-    texts, labels = [], []
-    for idx, label in enumerate(CLASSES):
-        for fname in (path / label).glob('*.*'):
-            texts.append(fname.open('r', encoding='utf-8').read())
-            labels.append(idx)
-    return np.array(texts), np.array(labels)
-
-
 def epoch_end_hook() -> None:
     lr_schedule.reset()
 
 
-def eval(y_pred, y_true):
+# noinspection PyUnresolvedReferences
+def _eval(y_pred, y_true):
     """
         Expects a batch of input
 
@@ -188,57 +141,48 @@ if __name__ == "__main__":
 
     # Get args from console
     ap = argparse.ArgumentParser()
-    ap.add_argument("-q", "--quick", type=bool, required=False, help="True if you want to only train on first 1000 train,test samples")
-    ap.add_argument("-d", "--debug", type=bool, required=False, help="True if you want a verbose run")
-    ap.add_argument("-p", "--pretrained", type=bool, required=False, help="True if you want a verbose run")
-    ap.add_argument("-sf", "--safemode", type=bool, required=False, help="True if you dont want to save anything")
-    ap.add_argument("-ms", "--modelsuffix", default='_lowaux', type=str, help="Input either `_lowaux`;`_hightrn` or nothing depending on which kind of model you want to load.")
+    ap.add_argument("-q", "--quick", type=bool, required=False,
+                    help="True if you want to only train on first 1000 train,test samples")
+    ap.add_argument("-d", "--debug", type=bool, required=False,
+                    help="True if you want a verbose run")
+    ap.add_argument("-p", "--pretrained", type=bool, required=False,
+                    help="True if you want a verbose run")
+    ap.add_argument("-sf", "--safemode", type=bool, required=False,
+                    help="True if you dont want to save anything")
+    ap.add_argument("-ms", "--modelsuffix", default='_lowaux', type=str,
+                    help="Input either `_lowaux`;`_hightrn` or nothing depending on which kind of model you want to load.")
     ap.add_argument("-md", "--modeldir", required=True,
-                    help="Need to provide the folder name (not the entire dir) to the desired phase 2 model. "
-                         "E.g. `--modeldir 2` shall suffice.")
+                    help="Need to provide the folder name (not the entire dir) to the desired phase 2 model. E.g. `--modeldir 2` shall suffice.")
 
     args = vars(ap.parse_args())
-    QUICK, DEBUG, MODEL_NUM, PRETRAINED = args['quick'], args['debug'], args['modeldir'], args['pretrained']
+    QUICK = args['quick']
+    DEBUG = args['debug']
+    MODEL_NUM = args['modeldir']
+    PRETRAINED = args['pretrained']
     MODEL_SUFFIX = args['modelsuffix']
     SAFE_MODE = args['safemode']
     UNSUP_MODEL_DIR = PATH / 'models' / MODEL_NUM
+
     assert MODEL_SUFFIX in ['_lowaux', '_hightrn', '', '_final'], 'Incorrect Suffix given with which to load model'
 
-    trn_texts, trn_labels = get_texts_org(DATA_PATH / 'train')
-    val_texts, val_labels = get_texts_org(DATA_PATH / 'test')
+    params.quick = QUICK
+    params.model_dir = str(UNSUP_MODEL_DIR) + ' and ' + str(MODEL_NUM)
+    params.model_suffix = MODEL_SUFFIX
+
+    data_puller = DataPuller(debug=False, max_vocab=params.max_vocab_task, min_freq=params.min_vocab_freq, trim_trn=1000, trim_val=-1)
+    trn_texts, trn_labels, val_texts, val_labels, itos = data_puller.get('imdb', supervised=True, trim=params.quick)
 
     # Lose label 2 from train
-    trn_texts = trn_texts[trn_labels<2]
-    trn_labels = trn_labels[trn_labels<2]
+    trn_texts = trn_texts[trn_labels < 2]
+    trn_labels = trn_labels[trn_labels < 2]
 
-    # Shuffle data
-    if QUICK:
-        np.random.seed(42)
-        trn_idx = np.random.permutation(len(trn_texts))[:1000]
-        val_idx = np.random.permutation(len(val_texts))[:1000]
-    else:
-        np.random.seed(42)
-        trn_idx = np.random.permutation(len(trn_texts))
-        val_idx = np.random.permutation(len(val_texts))
-
-    trn_texts, trn_labels = trn_texts[trn_idx], trn_labels[trn_idx]
-    val_texts, val_labels = val_texts[val_idx], val_labels[val_idx]
-    col_names = ['labels', 'text']
-
-    df_trn = pd.DataFrame({'text': trn_texts, 'labels': trn_labels}, columns=col_names)
-    df_val = pd.DataFrame({'text': val_texts, 'labels': val_labels}, columns=col_names)
-
+    # Create representations of text using old itos
     itos_path = UNSUP_MODEL_DIR / 'itos.pkl'
     itos2 = pickle.load(itos_path.open('rb'))
     stoi2 = {v: k for k, v in enumerate(itos2)}
 
-    trn_clas, trn_labels = get_all(df_trn, 1)
-    val_clas, val_labels = get_all(df_val, 1)
-
-    trn_clas = np.array([[stoi2.get(w, 0) for w in para] for para in trn_clas])
-    val_clas = np.array([[stoi2.get(w, 0) for w in para] for para in val_clas])
-    trn_labels = [x for y in trn_labels for x in y]
-    val_labels = [x for y in val_labels for x in y]
+    trn_texts = np.array([[stoi2.get(w, 0) for w in para] for para in trn_texts])
+    val_texts = np.array([[stoi2.get(w, 0) for w in para] for para in val_texts])
 
     '''
         Make model
@@ -259,7 +203,7 @@ if __name__ == "__main__":
 
     # Make data
     data_fn = partial(mtdi.SortishSampler, _batchsize=bs, _padidx=1)
-    data = {'train': {'x': trn_clas, 'y': trn_labels}, 'valid': {'x': val_clas, 'y': val_labels}}
+    data = {'train': {'x': trn_texts, 'y': trn_labels}, 'valid': {'x': val_texts, 'y': val_labels}}
 
     # Make lr scheduler
     lr_args = {'iterations': len(data_fn(data['train'])), 'cycles': 1}
@@ -272,7 +216,7 @@ if __name__ == "__main__":
             'train_fn': clf, 'predict_fn': clf.predict,
             'epoch_end_hook': epoch_end_hook, 'weight_decay': params.weight_decay,
             'clip_grads_at': params.clip_grads_at, 'lr_schedule': lr_schedule,
-            'data_fn': data_fn, 'eval_fn': eval,
+            'data_fn': data_fn, 'eval_fn': _eval,
             'save': not SAFE_MODE, 'save_params': params, 'save_dir': UNSUP_MODEL_DIR, 'save_args': save_args}
 
     '''
