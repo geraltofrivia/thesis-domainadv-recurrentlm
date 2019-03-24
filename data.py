@@ -3,9 +3,9 @@
 
         IMDB
         Wikitext103
-        Yelp Reviews
+        Yelp Reviews    [Takes forever, not doing this]
 
-    Usage:
+    Usage @TODO:
 
     1. Get language model training data for imdb (only text)
 
@@ -129,6 +129,8 @@ class DataPuller:
                     return trn_texts, val_texts, self.itos.copy()
 
             except FileNotFoundError:
+                if self.debug:
+                    traceback.print_exc()
                 warnings.warn(f"Couldn't find requested processed dataset ({src}) from cache, making it from scratch.")
 
         trn_texts, trn_labels, val_texts, val_labels = getattr(self, '_'+src+'_')()
@@ -167,6 +169,7 @@ class DataPuller:
             np.save(cache_path/'val_texts.npy', val_texts)
             np.save(cache_path/'val_labels.npy', val_labels)
             pickle.dump(self.itos, open(cache_path/'itos.pkl', 'wb+'))
+            pickle.dump({'trim': trim}, open(cache_path/'options.pkl', 'wb+'))
 
         # Finally, return elements depending on `supervised` label | And log what we just accomplished
         self.processed.append(src)
@@ -196,7 +199,7 @@ class DataPuller:
         trn_texts, trn_lbl = [texts[i] for i in trn_idx], [labels[i] for i in trn_idx]
         val_texts, val_lbl = [texts[i] for i in val_idx], [labels[i] for i in val_idx]
 
-        return self.__common_preprocessing_(trn_texts, trn_lbl, val_texts, val_lbl, _distribute=False)
+        return self.__common_preprocessing_(trn_texts, trn_lbl, val_texts, val_lbl, _distribute=True)
 
     def _wikitext_(self)->(List[str], List[int], List[str], List[int]):
         """ Adds validation set to train """

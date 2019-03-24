@@ -33,7 +33,7 @@ from data import DataPuller
 from options import Phase2 as params
 
 DEVICE = 'cuda:2'
-
+KNOWN_DATASETS = ['imdb', 'wikitext']
 
 device = torch.device(DEVICE)
 np.random.seed(42)
@@ -504,18 +504,30 @@ def generic_loop(epochs: int,
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Domain adversarial for ULMFiT\'s language models')
-    parser.add_argument("-t", "--quick", type=bool, required=False,
+    parser.add_argument("-t", "--quick", type=str2bool, required=False,
                         help="True if you want to only train on first 1000 train,test samples")
-    parser.add_argument("-d", "--debug", type=bool, required=False, help="True if you want a verbose run")
-    parser.add_argument("-sf", "--safemode", type=bool, required=False, help="True if you dont want to save anything")
-    parser.add_argument("-m", "--message", type=str, required=False, help="Message to be saved alongwith traces", default=None)
-    parser.add_argument("-p", "--pretrained", type=bool, required=False,
+    parser.add_argument("--debug", type=str2bool, required=False,
+                        help="True if you want a verbose run")
+    parser.add_argument("-sf", "--safemode", type=str2bool, required=False,
+                        help="True if you dont want to save anything")
+    parser.add_argument("-m", "--message", type=str, required=False,
+                        help="Message to be saved alongwith traces", default=None)
+    parser.add_argument("-p", "--pretrained", type=str2bool, required=False,
                         help="False if you don't want to load pretrained weights in LM")
+    parser.add_argument("-d", "--datasets", type=str, required=False, default="imdb,wikitext",
+                        help="Comma separated two dataset names like wikitext,imdb" )
 
     parse_args = vars(parser.parse_args())
-    QUICK, DEBUG, PRETRAINED = parse_args['quick'], parse_args['debug'], parse_args['pretrained']
+    QUICK = parse_args['quick']
+    DEBUG = parse_args['debug']
+    PRETRAINED = parse_args['pretrained']
     MESSAGE = parse_args['message']
-    SAFE_MODE =  parse_args['safemode']
+    SAFE_MODE = parse_args['safemode']
+    DATASETS = parse_args['datasets'].split(',')
+
+    # Check args.
+    for dataset in DATASETS:
+        assert dataset in KNOWN_DATASETS, f"Couldn't find a dataset called {dataset}. Exiting."
 
     params.message = MESSAGE
     params.quick = QUICK
@@ -532,6 +544,10 @@ if __name__ == '__main__':
     """
         Now we pull pretrained models from disk    
     """
+
+    if DEBUG:
+        print("Pulling models from disk")
+
     em_sz, nh, nl = 400, 1150, 3
     # PRE_PATH = PATH / 'models' / 'wt103'
     # PRE_LM_PATH = PRE_PATH / 'fwd_wt103.h5'
