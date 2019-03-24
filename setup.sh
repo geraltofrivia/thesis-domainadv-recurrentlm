@@ -29,9 +29,18 @@ wget http://ai.stanford.edu/~amaas/data/sentiment/aclImdb_v1.tar.gz -P ./raw/imd
 tar -zxvf ./raw/imdb/aclImdb_v1.tar.gz -C ./raw/imdb/
 
 # Download Wikitext103
+echo "Moving on to Wikitext103"
 mkdir raw/wikitext
 wget https://s3.amazonaws.com/research.metamind.io/wikitext/wikitext-103-v1.zip -P ./raw/wikitext/
 unzip ./raw/wikitext/wikitext-103-v1.zip -d ./raw/wikitext/
+
+# Download TREC 6
+echo "Couldn't find the right version on TREC website (https://trec.nist.gov/data/topics_eng/). Downloading from http://cogcomp.org/Data/QA/QC/ instead"
+mkdir raw/trec
+wget http://cogcomp.org/Data/QA/QC/train_5500.label -P ./raw/trec/
+wget http://cogcomp.org/Data/QA/QC/TREC_10.label -P ./raw/trec/
+mv raw/trec/train_5500.label raw/trec/train
+mv raw/trec/TREC_10.label raw/trec/test
 
 # Download pretrained model
 echo "Finally, lets download the pretrained model and we're good to go."

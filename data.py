@@ -26,7 +26,7 @@ from mytorch.utils.goodies import *
 
 # Paths & other macros
 re1 = re.compile(r'  +')
-KNOWN_SOURCES = ['yelp', 'imdb', 'wikitext']
+KNOWN_SOURCES = ['yelp', 'imdb', 'wikitext', 'trec']
 BOS = 'xbos'  # beginning-of-sentence tag
 FLD = 'xfld'  # data field tag
 IMDB_CLASSES = ['neg', 'pos', 'unsup']
@@ -34,6 +34,7 @@ WIKI_CLASSES = ['wiki.train.tokens', 'wiki.valid.tokens', 'wiki.test.tokens']
 
 WIKI_DATA_PATH = Path('./raw/wikitext/wikitext-103/')
 IMDB_DATA_PATH = Path('./raw/imdb/aclImdb/')
+TREC_DATA_PATH = Path('./raw/trec/')
 YELP_DATA_PATH = Path('./raw/yelp/')
 CACHED_PATH_TEMPLATE = "./resources/proc/%(src)s/cached"
 WIKI_DATA_PATH.mkdir(exist_ok=True)
@@ -185,6 +186,14 @@ class DataPuller:
 
         return self.__common_preprocessing_(trn_texts, trn_lbl, val_texts, val_lbl)
 
+    def _trec_(self)->(List[str], List[int], List[str], List[int]):
+        """ Using the 6 class version of the dataset """
+
+        trn_texts, trn_lbl = self.__trec_pull_from_disk__(TREC_DATA_PATH / 'train')
+        val_texts, val_lbl = self.__trec_pull_from_disk__(TREC_DATA_PATH / 'test')
+
+        return self.__common_preprocessing_(trn_texts, trn_lbl, val_texts, val_lbl)
+
     def _yelp_(self)->(List[str], List[int], List[str], List[int]):
         """ Converts 5 star rating into a binary setting (see https://arxiv.org/abs/1801.06146) """
         data = pd.read_json(YELP_DATA_PATH / 'review.json', lines=True)
@@ -206,7 +215,7 @@ class DataPuller:
         trn_texts, val_texts, tst_texts = self.__wiki_pull_from_disk__(WIKI_DATA_PATH)
 
         if self.debug:
-            print(f"Pulling Wikidata from disk with {len(trn_texts)} train, {len(val_texts)} valid and {len(tst_texts)} test samples")
+            print(f"Pulled Wikidata from disk with {len(trn_texts)} train, {len(val_texts)} valid and {len(tst_texts)} test samples")
 
         # trn <- val + trn
         trn_texts = np.concatenate([trn_texts, val_texts])
@@ -313,6 +322,16 @@ class DataPuller:
                 texts.append(fname.open('r', encoding='utf-8').read())
                 labels.append(idx)
         return np.array(texts), np.array(labels)
+
+    @staticmethod
+    def __trec_pull_from_disk__(path: Path):
+        # noinspection PyTypeChecker
+        raw = open(path, 'r', encoding='utf-8')
+        raw_lbl, raw_txt = [] ,[]
+        for line in raw:
+            raw_lbl.append(line.split()[0].split(':')[0])
+            raw_txt.append(' '.join(line.split()[1:]))
+        return np.array(raw_txt), np.array(raw_lbl)
 
     def __wiki_pull_from_disk__(self, path: Path)->tuple:
         texts = []
