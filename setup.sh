@@ -57,3 +57,12 @@ mkdir resources/proc/imdb/dann_trim_default
 mkdir resources/proc/imdb/dann_full_default
 mkdir resources/proc/imdb/phase2_trim_default
 mkdir resources/proc/imdb/phase2_full_default
+mkdir resources/proc/wikitext
+mkdir resources/proc/wikitext/cached
+mkdir resources/proc/trec
+mkdir resources/proc/trec/cached
+mkdir resources/proc/yelp
+mkdir resources/proc/yelp/cached
+
+
+

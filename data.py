@@ -326,7 +326,7 @@ class DataPuller:
     @staticmethod
     def __trec_pull_from_disk__(path: Path):
         # noinspection PyTypeChecker
-        raw = open(path, 'r', encoding='utf-8')
+        raw = open(path, 'r', encoding='ISO-8859-1')
         raw_lbl, raw_txt = [] ,[]
         for line in raw:
             raw_lbl.append(line.split()[0].split(':')[0])
