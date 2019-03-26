@@ -2,7 +2,7 @@
 # External Lib imports
 import collections
 from functools import partial
-from typing import List, Union, Callable
+from typing import Tuple, Union, Callable
 
 # Torch imports
 import torch.nn as nn
@@ -52,7 +52,7 @@ PRE_LM_PATH = PRE_PATH / 'fwd_wt103.h5'
 class DomainAgnosticSampler:
     """ Sample data for language model training from two different domains in one batch. """
 
-    def __init__(self, data_fn: Callable, data: List[Union[list, np.ndarray], Union[list, np.ndarray]]):
+    def __init__(self, data_fn: Callable, data: Tuple[Union[list, np.ndarray], Union[list, np.ndarray]]):
         """
             Here, data_fn would be something like
                 `partial(text.LanguageModelLoader, bs=bs, bptt=bptt)`
@@ -267,7 +267,7 @@ if __name__ == '__main__':
 
     # Pulling data from disk
     data_puller = DataPuller(debug=False, max_vocab=params.max_vocab_task, min_freq=params.min_vocab_freq, trim_trn=1000, trim_val=-1)
-    trn_lm, val_lm, _ = data_puller.get('imdb', supervised=False, trim=params.quick)
+    trn_lm, val_lm, _ = data_puller.get('imdb', supervised=False, trim=params.quick, cached=not params.quick)
     wiki_trn_lm, wiki_val_lm, itos = data_puller.get('wikitext', supervised=False, trim=params.quick,
                                                      merge_vocab=params.max_vocab_wiki, cached=not params.quick)
     vs = len(itos)
@@ -326,8 +326,8 @@ if __name__ == '__main__':
 
     # Make data
     data_fn_unidomain = partial(text.LanguageModelLoader, bs=bs, bptt=bptt)
-    data_train = {[np.concatenate(trn_lm), np.concatenate(wiki_trn_lm)]}
-    data_valid = {[np.concatenate(val_lm)], np.concatenate(wiki_val_lm)}
+    data_train = (np.concatenate(trn_lm), np.concatenate(wiki_trn_lm))
+    data_valid = (np.concatenate(val_lm), np.concatenate(wiki_val_lm))
     data = {'train': data_train, 'valid': data_valid}
     data_fn = partial(DomainAgnosticSampler, data_fn=data_fn_unidomain)
 
