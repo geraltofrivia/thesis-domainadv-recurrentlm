@@ -78,7 +78,7 @@ class DataPuller:
         self.trim_val = trim_val if trim_val > 0 else None
 
         self.processed = []
-        self.itos, self.stoi = [], collections.defaultdict(lambda: 0, {})
+        self.itos, self.stoi = [], {}
 
     def get(self, src, supervised: bool = True, trim: bool = False, merge_vocab: int = 0, cached: bool = True) \
             -> (List[np.ndarray], Optional[List[np.ndarray]], List[np.ndarray], Optional[List[np.ndarray]], List[str]):
@@ -108,7 +108,7 @@ class DataPuller:
         src = src.lower()
         assert src in KNOWN_SOURCES, f'Incorrect dataset name ({src}) passed.'
 
-        if cached and len(self.processed) is 0:
+        if cached and len(self.processed) == 0:
             try:
                 cache_path = Path(CACHED_PATH_TEMPLATE % {'src': src})
                 options = pickle.load(open(cache_path/'options.pkl', 'rb'))
@@ -265,21 +265,22 @@ class DataPuller:
 
         freq = Counter(tok for sent in source for tok in sent)
 
-        if merge_vocab < 0:
+        if len(self.processed) == 0:
 
             # Make new itos from scratch
             itos = [o for o, c in freq.most_common(self.max_vocab) if c > self.min_freq]
             itos.insert(0, '_pad_')
             itos.insert(0, '_unk_')
-            stoi = collections.defaultdict(lambda: 0, {v: k for k, v in enumerate(itos)})
+            stoi = {v: k for k, v in enumerate(itos)}
             self.itos, self.stoi = itos.copy(), stoi.copy()
 
         else:
 
             tok_sorted = freq.sorted()
+            vocab_len = len(self.itos)
             for word, count in tok_sorted:
 
-                if len(self.itos) >= self.max_vocab + merge_vocab:
+                if len(self.itos) >= vocab_len + merge_vocab:
                     break
 
                 if word not in self.stoi.keys():
@@ -295,7 +296,7 @@ class DataPuller:
 
         ids = []
         for toconvert in texts:
-            converted = [[self.stoi[o] for o in p] for p in toconvert]
+            converted = [[self.stoi.get(o, 0) for o in p] for p in toconvert]
             ids.append(np.array(converted))
 
         return ids

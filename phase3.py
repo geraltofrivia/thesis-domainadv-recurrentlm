@@ -7,7 +7,7 @@
 
 # External Lib imports
 import os
-from typing import Union, List
+from typing import List
 from functools import partial
 
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
@@ -20,8 +20,8 @@ import torch.nn as nn
 import torch.optim as optim
 
 # Mytorch imports
-from mytorch import loops, lriters as mtlr, dataiters as mtdi
 from mytorch.utils.goodies import *
+from mytorch import loops, lriters as mtlr
 
 # Local imports
 import main as p2
@@ -191,32 +191,33 @@ if __name__ == "__main__":
     params.model_suffix = MODEL_SUFFIX
     params.datasets = DATASETS
 
-    data_puller = DataPuller(debug=False, max_vocab=params.max_vocab_task, min_freq=params.min_vocab_freq, trim_trn=1000, trim_val=-1)
-    trn_texts_a, trn_labels_a, val_texts_a, val_labels_a, _ = data_puller.get(DATASETS[0], supervised=True,
-                                                                              trim=params.quick, cached=not params.quick)
-    trn_texts_b, trn_labels_b, val_texts_b, val_labels_b, itos = data_puller.get(DATASETS[1], supervised=True,
-                                                                                 trim=params.quick, merge_vocab=params.max_vocab_wiki)
-
-    # Lose label 2 from imdb
-    if DATASETS[0] == 'imdb':
-        trn_texts_a = trn_texts_a[trn_labels_a < 2]
-        trn_labels_a = trn_labels_a[trn_labels_a < 2]
-
-    # Lose label 2 from imdb
-    if len(DATASETS) > 1:
-        if DATASETS[1] == 'imdb':
-            trn_texts_b = trn_texts_b[trn_labels_b < 2]
-            trn_labels_b = trn_labels_b[trn_labels_b < 2]
-
     # Create representations of text using old itos
     itos_path = UNSUP_MODEL_DIR / 'itos.pkl'
     itos2 = pickle.load(itos_path.open('rb'))
     stoi2 = {v: k for k, v in enumerate(itos2)}
 
+    data_puller = DataPuller(debug=False, max_vocab=params.max_vocab_task, min_freq=params.min_vocab_freq, trim_trn=1000, trim_val=-1)
+
+    trn_texts_a, trn_labels_a, val_texts_a, val_labels_a, _ = data_puller.get(DATASETS[0], supervised=True,
+                                                                              trim=params.quick, cached=not params.quick)
+    # Lose label 2 from imdb
+    if DATASETS[0] == 'imdb':
+        trn_texts_a = trn_texts_a[trn_labels_a < 2]
+        trn_labels_a = trn_labels_a[trn_labels_a < 2]
+
     trn_texts_a = np.array([[stoi2.get(w, 0) for w in para] for para in trn_texts_a])
     val_texts_a = np.array([[stoi2.get(w, 0) for w in para] for para in val_texts_a])
-    trn_texts_b = np.array([[stoi2.get(w, 0) for w in para] for para in trn_texts_b])
-    val_texts_b = np.array([[stoi2.get(w, 0) for w in para] for para in val_texts_b])
+
+    if len(DATASETS) > 1:
+        trn_texts_b, trn_labels_b, val_texts_b, val_labels_b, itos = data_puller.get(DATASETS[1], supervised=True,
+                                                                                     trim=params.quick, merge_vocab=params.max_vocab_wiki)
+
+        if DATASETS[1] == 'imdb':
+            trn_texts_b = trn_texts_b[trn_labels_b < 2]
+            trn_labels_b = trn_labels_b[trn_labels_b < 2]
+
+        trn_texts_b = np.array([[stoi2.get(w, 0) for w in para] for para in trn_texts_b])
+        val_texts_b = np.array([[stoi2.get(w, 0) for w in para] for para in val_texts_b])
 
     '''
         Make model
@@ -238,6 +239,7 @@ if __name__ == "__main__":
     opt.param_groups[-1]['lr'] = 0.01
 
     # Make data
+    # @TODO: make this code compatible with one dataset (no dann)
     data_fn = partial(utils.DomainAgnosticSortishSampler, _batchsize=bs, _padidx=1)
     data_train = [{'x': trn_texts_a, 'y': trn_labels_a}, {'x': trn_texts_b, 'y': trn_labels_b}]
     data_valid = [{'x': val_texts_a, 'y': val_labels_a}, {'x': val_texts_b, 'y': val_labels_b}]
@@ -256,11 +258,12 @@ if __name__ == "__main__":
                             {'model': 'sup_model_lowaux.torch',
                              'enc': 'sup_model_lowaux_enc.torch'}}}
 
-    args = {'epochs': 1, 'epoch_count': 0, 'data': data, 'device': device,
-            'opt': opt, 'loss_main_fn': loss_main_fn, 'loss_aux_fn': loss_aux_fn, 'model': clf,
+    args = {'epochs': 1, 'epoch_count': 0, 'data': data, 'device': device, 'opt': opt,
+            'loss_main_fn': loss_main_fn, 'loss_aux_fn': loss_aux_fn, 'model': clf,
             'train_fn': clf, 'predict_fn': clf.predict, 'train_aux_fn': clf.domain,
             'epoch_end_hook': epoch_end_hook, 'weight_decay': params.weight_decay,
             'clip_grads_at': params.clip_grads_at, 'lr_schedule': lr_schedule,
+            'loss_scale': params.loss_scale if len(DATASETS) > 1 else 0,
             'data_fn': data_fn, 'eval_fn': _eval, 'eval_aux_fn': _eval,
             'save': not SAFE_MODE, 'save_params': params, 'save_dir': UNSUP_MODEL_DIR, 'save_fnames': save_fnames}
 
@@ -280,7 +283,7 @@ if __name__ == "__main__":
     args['lr_schedule'] = lr_schedule
     args['save_above'] = np.max(traces[TRACES_FORMAT['train_acc']])
     args['epoch_count'] += 1
-    traces_new = loops.generic_loop(**args)
+    traces_new = utils.dann_loop(**args)
     traces = [a+b for a, b in zip(traces, traces_new)]
 
     opt.param_groups[-1]['lr'] = 0.01
@@ -290,7 +293,7 @@ if __name__ == "__main__":
     args['lr_schedule'] = lr_schedule
     args['save_above'] = np.max(traces[TRACES_FORMAT['train_acc']])
     args['epoch_count'] += 1
-    traces_new = loops.generic_loop(**args)
+    traces_new = utils.dann_loop(**args)
     traces = [a+b for a, b in zip(traces, traces_new)]
 
     opt.param_groups[-1]['lr'] = 0.01
@@ -301,7 +304,7 @@ if __name__ == "__main__":
     args['lr_schedule'] = lr_schedule
     args['save_above'] = np.max(traces[TRACES_FORMAT['train_acc']])
     args['epoch_count'] += 1
-    traces_new = loops.generic_loop(**args)
+    traces_new = utils.dann_loop(**args)
     traces = [a+b for a, b in zip(traces, traces_new)]
 
     opt.param_groups[-1]['lr'] = 0.01
@@ -313,7 +316,7 @@ if __name__ == "__main__":
     args['lr_schedule'] = lr_schedule
     args['save_above'] = np.max(traces[TRACES_FORMAT['train_acc']])
     args['epoch_count'] += 1
-    traces_new = loops.generic_loop(**args)
+    traces_new = utils.dann_loop(**args)
     traces = [a+b for a, b in zip(traces, traces_new)]
 
     opt.param_groups[-1]['lr'] = 0.01
@@ -329,7 +332,7 @@ if __name__ == "__main__":
     args['epoch_count'] += 1
     args['notify'] = True
 
-    traces_new = loops.generic_loop(**args)
+    traces_new = utils.dann_loop(**args)
     traces = [a+b for a, b in zip(traces, traces_new)]
 
     if not SAFE_MODE:

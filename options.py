@@ -24,7 +24,7 @@ class Phase2:
     domclas_drops = [0.2, 0.1]
 
     bs = 20
-    loss_scale = 0.5
+    loss_scale = 5.0
 
 class Phase3:
     encoder_dropouts = np.asarray([0.4, 0.5, 0.05, 0.3, 0.4]) * 0.5
@@ -35,6 +35,7 @@ class Phase3:
     max_vocab_task = 70000
     max_vocab_wiki = 2000
     min_vocab_freq = 2
+    loss_scale = 5.0
 
 
 class _Phase2:
