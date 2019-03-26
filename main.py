@@ -1,9 +1,8 @@
 # noinspection PyShadowingNames
 # External Lib imports
 import collections
-from tqdm import tqdm
-from typing import Callable
 from functools import partial
+from typing import List, Union, Callable
 
 # Torch imports
 import torch.nn as nn
@@ -16,8 +15,9 @@ from mytorch.utils.goodies import *
 from mytorch import lriters as mtlr
 
 # Local imports
+from utils import dann_loop
 from data import DataPuller
-from options import Phase2 as Params
+from options import Phase2 as params
 
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 
@@ -52,7 +52,7 @@ PRE_LM_PATH = PRE_PATH / 'fwd_wt103.h5'
 class DomainAgnosticSampler:
     """ Sample data for language model training from two different domains in one batch. """
 
-    def __init__(self, data_fn, data_a, data_b):
+    def __init__(self, data_fn: Callable, data: List[Union[list, np.ndarray], Union[list, np.ndarray]]):
         """
             Here, data_fn would be something like
                 `partial(text.LanguageModelLoader, bs=bs, bptt=bptt)`
@@ -60,6 +60,7 @@ class DomainAgnosticSampler:
                 `{'train': np.concatenate(trn_lm), 'valid': np.concatenate(val_lm)}['train']`
             data_fn (fastai's language model loader) flattens y and returns x of seqlen, batchsize
         """
+        data_a, data_b = data
         self.args = {'data_fn': data_fn, 'data_a': data_a, 'data_b': data_b}
         self.reset(**self.args)
         self.itera, self.iterb = iter([]), iter([])
@@ -122,6 +123,10 @@ class DomainAgnosticSampler:
 
 class CustomEncoder(lm_rnn.RNN_Encoder):
 
+    def forward(self, input, domain=None):
+        """ Overwrote fn to keep the interface same b/w phase 2 & phase 3 models (same training loop)"""
+        super().forward(input)
+
     @property
     def layers(self):
         return torch.nn.ModuleList([torch.nn.ModuleList([self.rnns[0], self.dropouths[0]]),
@@ -159,6 +164,7 @@ class CustomLinear(lm_rnn.PoolingLinearClassifier):
                 x = func.relu(l_x)
             else:
                 x = torch.sigmoid(l_x)
+        # noinspection PyUnboundLocalVariable
         return l_x, raw_outputs, outputs
 
 
@@ -186,12 +192,12 @@ class LanguageModel(nn.Module):
         self.linear_dec = CustomDecoder(
             _encargs['ntoken'],
             n_hid=400,
-            dropout=Params.decoder_drops,
+            dropout=params.decoder_drops,
             tie_encoder=self.encoder.encoder,
             bias=False
         ).to(self.device)
 
-        self.linear_dom = CustomLinear(layers=Params.domclas_layers, drops=Params.domclas_drops).to(self.device)
+        self.linear_dom = CustomLinear(layers=params.domclas_layers, drops=params.domclas_drops).to(self.device)
         self.encoder.reset()
 
     def forward(self, x):
@@ -225,275 +231,6 @@ def _eval(y_pred, y_true):
     return torch.mean((torch.argmax(y_pred, dim=1) == y_true).float())
 
 
-'''
-    Training loop
-    
-        - sample from wiki
-            - e(x_w)        forward from encoder
-            - d(e(x_w))     forward from decoder
-            - backward normally
-            
-            - e(x_w)'       grad reverse layer
-            - d'(e(x_w)')   forward from domain agnostic layer
-            - backward
-            
-        - sample from imdb
-            - same...
-'''
-
-
-# noinspection PyShadowingNames
-def generic_loop(epochs: int,
-                 device: torch.device,
-                 opt: torch.optim,
-                 loss_main_fn: torch.nn,
-                 loss_aux_fn: torch.nn,
-                 loss_aux_scale: float,
-                 model: torch.nn.Module,
-                 train_fn: Callable,
-                 train_aux_fn: Callable,
-                 predict_fn: Callable,
-                 data_a: dict,
-                 data_b: dict,
-                 data_fn: classmethod,
-                 save_params,
-                 save_dir: Path = None,
-                 save_best: bool = False,
-                 save_above_trn: float = -np.inf,
-                 save_above_aux: float = np.inf,
-                 epoch_count: int = 0,
-                 epoch_start_hook: Callable = None,
-                 epoch_end_hook: Callable = None,
-                 batch_start_hook: Callable = None,
-                 batch_end_hook: Callable = None,
-                 weight_decay: float = Params.weight_decay,
-                 clip_grads_at: float = Params.clip_grads_at,
-                 lr_schedule = None,
-                 eval_fn: Callable = None,
-                 eval_aux_fn: Callable = None,
-                 notify: bool = False,
-                 notify_key: str = None) -> (list, list, list):
-    """
-
-        A generic training loop, which based on diff hook fns (defined below), should handle anything given to it.
-
-        The model need not be an nn.Module,
-             but should have correctly wired forward and a predict function.
-
-        # Data input
-            Data should be a dict like so:
-                {"train":{"x":np.arr, "y":np.arr}, "val":{"x":np.arr, "y":np.arr} }
-
-            Train_fn must return both loss and y_pred
-
-        # Saving Logic
-            There are two conditions on which it saves models (named differently).
-            1. Highest train accuracy
-            2. Lowest auxiliary accuracy (which is empirically seen to stabilize after two epochs) after two epochs have passed
-
-    :param epochs: number of epochs to train for
-    :param data_a: data dict (structure specified above) (main)
-    :param data_b: data dict (structure specified above) (aux)
-    :param device: torch device to init the tensors with
-    :param opt: torch optimizer, with proper param_groups for better lr decay per laye
-    :param loss_main_fn: torch.nn loss fn for the actual thing
-    :param loss_aux_fn: torch.nn loss fn for the domain agnostic thing
-    :param loss_aux_scale: float signifying how much to scale DANN loss with, while combining losses.
-    :param model: torch module (for grad clipping)
-    :param train_fn: a function which takes x & y, returns loss and y_pred
-    :param train_aux_fn: a function which takes x & y, returns loss and y_pred_aux
-    :param predict_fn: a fn which takes x and returns y_pred
-    :param epoch_count: an int which is added with #epochs (for better representation of how many epochs have actually passed)
-            You can use this for when you run the loop say 3 times, do something else and run it for another 10.
-    :param epoch_start_hook: a fn that can be called @ start of every epoch (returns model, opt)
-    :param epoch_end_hook: a fn that can be called @ end of every epoch (returns model, opt)
-    :param batch_start_hook: a fn that can be called @ start of every batch (returns model, opt)
-    :param batch_end_hook: a fn that can be called @r end of every batch (returns model, opt)
-    :param weight_decay: a L2 ratio (as mentioned in (https://arxiv.org/pdf/1711.05101.pdf)
-    :param clip_grads_at: in case you want gradients clipped, send the max val here
-    :param lr_schedule: a schedule that is called @ every batch start.
-    :param save_best: bool which wants either doesn't save, or saves at best
-    :param save_dir: Path object to which we save stuff (based on save_best)
-    :param save_params: a dict of all the params used while running and training the model.
-    :param save_above_trn: [OPTIONAL] acts as threshold regarading model saving. If the current trn accuracy is less than this, won't.
-    :param save_above_aux: [OPTIONAL] acts as threshold regarading model saving. If the current aux accuracy is more than this, won't.
-    :param data_fn: a class to which we can pass X and Y, and get an iterator.
-    :param eval_fn: function which when given pred and true, returns acc
-    :param eval_aux_fn: same as eval_fn but for domain classifier's output.
-    :param notify: (optional) flag which enables sending notifications to your phones once the loop is done.
-    :param notify_key: (optional) the api key to which the notification is to be sent. You can give it here, or in a file (see README.md)
-    :return: traces
-    """
-
-    train_loss_main = []
-    train_loss_aux = []
-    train_acc_main = []
-    train_acc_aux = []
-    val_acc = []
-    lrs = []
-    saved_info = {}
-
-    assert (not save_best) or (save_best and save_dir), "No save dir specified."
-
-    # Epoch level
-    for e in range(epoch_count, epochs+epoch_count):
-
-        per_epoch_loss_main = []
-        per_epoch_loss_aux = []
-        per_epoch_tr_acc_main = []
-        per_epoch_tr_acc_aux = []
-
-        # Train
-        with Timer() as timer:
-
-            model.train()
-
-            # @TODO: Add hook at start of epoch (how to decide what goes in)
-            if epoch_start_hook: epoch_start_hook()
-
-            # Make data
-            trn_dl = data_fn(data_a=data_a['train'], data_b=data_b['train'])
-            val_dl = data_fn(data_a=data_a['valid'], data_b=data_b['valid'])
-
-            for x, y, y_aux in tqdm(trn_dl):
-
-                if batch_start_hook:
-                    batch_start_hook()
-
-                opt.zero_grad()
-
-                if lr_schedule: lrs.append(update_lr(opt, lr_schedule.get()))
-
-                # 0. Convert np arrs to torch tensors
-                _x = torch.tensor(x, dtype=torch.long, device=device)
-                _y = torch.tensor(y, dtype=torch.long, device=device)
-                _y_aux = torch.tensor(y_aux, dtype=torch.long, device=device)
-
-                # A: Normal stuff
-                op = train_fn(_x)
-                y_pred = op[0]
-                loss_main = loss_main_fn(y_pred, _y)
-
-                # B: Domain agnostic stuff
-                y_pred_aux = train_aux_fn(op[1:])
-                loss_aux = loss_aux_fn(y_pred_aux, _y_aux)
-
-                # C. Add losses with scale.
-                loss = loss_main + (loss_aux_scale * loss_aux)
-
-                # Logging
-                per_epoch_tr_acc_main.append(eval_fn(y_pred=y_pred, y_true=_y).item())
-                per_epoch_tr_acc_aux.append(eval_aux_fn(y_pred=y_pred_aux, y_true=_y_aux).item())
-                per_epoch_loss_main.append(loss_main.item())
-                per_epoch_loss_aux.append(loss_aux.item())
-
-                # Pass aux gradients
-                loss.backward(retain_graph=False)
-
-                # Optimizer Step
-                if clip_grads_at > 0.0: torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grads_at)
-                for group in opt.param_groups:
-                    for param in group['params']:
-                        param.data = param.data.add(-weight_decay * group['lr'], param.data)
-
-                opt.step()
-                if batch_end_hook:
-                    batch_end_hook()
-
-            if epoch_end_hook:
-                epoch_end_hook()
-
-        # Val
-        with torch.no_grad():
-
-            model.eval()
-
-            per_epoch_vl_acc = []
-            for x, y, y_aux in tqdm(val_dl):
-                _x = torch.tensor(x, dtype=torch.long, device=device)
-                _y = torch.tensor(y, dtype=torch.long, device=device)
-
-                y_pred = predict_fn(_x)[0]
-
-                per_epoch_vl_acc.append(eval_fn(y_pred, _y).item())
-
-        # Bookkeep
-        train_acc_main.append(np.mean(per_epoch_tr_acc_main))
-        train_acc_aux.append(np.mean(per_epoch_tr_acc_aux))
-        train_loss_main.append(np.mean(per_epoch_loss_main))
-        train_loss_aux.append(np.mean(per_epoch_loss_main))
-        val_acc.append(np.mean(per_epoch_vl_acc))
-
-        print("Epoch: %(epo)03d | "
-              "Loss: %(loss).4f | "
-              "Loss_aux: %(loss_aux).4f | "
-              "Tr_c: %(tracc)0.4f | "
-              "Vl_c: %(vlacc)0.5f | "
-              "Tr_aux: %(tracc_aux)0.4f | "
-              " Time: %(time).3f m"
-              % {'epo': e+epoch_count,
-                 'loss': float(np.mean(per_epoch_loss_main)),
-                 'loss_aux': float(np.mean(per_epoch_loss_aux)),
-                 'tracc': float(np.mean(per_epoch_tr_acc_main)),
-                 'tracc_aux': float(np.mean(per_epoch_tr_acc_aux)),
-                 'vlacc': float(np.mean(per_epoch_vl_acc)),
-                 'time': timer.interval / 60.0})
-
-        # Save block (flag and condition)
-        if save_best and train_acc_main[-1] >= save_above_trn:
-
-            # Update threshold
-            save_above_trn = train_acc_main[-1]
-
-            # Adding epoch info along with options
-            save_params.epoch = e
-
-            # Call save function and save
-            mt_save(save_dir,
-                    torch_stuff=[tosave('unsup_model_hightrn.torch', model.state_dict()),
-                                 tosave('unsup_model_enc_hightrn.torch', model.encoder.state_dict())],
-                    pickle_stuff=[tosave('unsup_traces.pkl', [train_acc_main, val_acc, train_acc_aux, train_loss_main, train_loss_aux, lrs]),
-                                  tosave('unsup_options.pkl', save_params)])
-            print(f"Model saved on Epoch {e} at {save_dir} because of highest training acc so far")
-
-            # Log the saved thing
-            saved_info['epoch'] = e
-            saved_info['accuracy'] = val_acc[-1]
-            saved_info['directory'] = save_dir
-
-        # Save block (flag and condition) (When more than 2 epochs have pased and we see lowest aux accuracy)
-        if save_best and e > 1 and train_acc_aux[-1] <= save_above_aux:
-
-            # Update threshold
-            save_above_aux = train_acc_aux[-1]
-
-            # Adding epoch info along with options
-            save_params.epoch = e
-
-            # Call save function and save
-            mt_save(save_dir,
-                    torch_stuff=[tosave('unsup_model_lowaux.torch', model.state_dict()),
-                                 tosave('unsup_model_enc_lowaux.torch', model.encoder.state_dict())],
-                    pickle_stuff=[
-                        tosave('unsup_traces.pkl', [train_acc_main, val_acc, train_acc_aux, train_loss_main, train_loss_aux, lrs]),
-                        tosave('unsup_options.pkl', save_params)])
-            print(f"Model saved on Epoch {e} at {save_dir} because of lowest auxiliary accuracy so far")
-
-            # Log the saved thing
-            saved_info['epoch'] = e
-            saved_info['accuracy'] = val_acc[-1]
-            saved_info['directory'] = save_dir
-
-    if notify:
-        if not saved_info:
-            message_template = "Your model is done training."
-            send_notification(data=saved_info, key=notify_key, message_template=message_template)
-        else:
-            send_notification(data=saved_info, key=notify_key)
-
-    return train_acc_main, val_acc, train_acc_aux, train_loss_main, train_loss_aux, lrs
-
-
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Domain adversarial for ULMFiT\'s language models')
@@ -508,7 +245,7 @@ if __name__ == '__main__':
     parser.add_argument("-p", "--pretrained", type=str2bool, required=False,
                         help="False if you don't want to load pretrained weights in LM")
     parser.add_argument("-d", "--datasets", type=str, required=False, default="imdb,wikitext",
-                        help="Comma separated two dataset names like wikitext,imdb" )
+                        help="Comma separated two dataset names like wikitext,imdb")
 
     parse_args = vars(parser.parse_args())
     QUICK = parse_args['quick']
@@ -522,16 +259,17 @@ if __name__ == '__main__':
     for dataset in DATASETS:
         assert dataset in KNOWN_DATASETS, f"Couldn't find a dataset called {dataset}. Exiting."
 
-    Params.message = MESSAGE
-    Params.quick = QUICK
+    params.message = MESSAGE
+    params.quick = QUICK
 
     if DEBUG:
         print("Pulling data from disk")
 
     # Pulling data from disk
-    data_puller = DataPuller(debug=False, max_vocab=Params.max_vocab_task, min_freq=Params.min_vocab_freq, trim_trn=1000, trim_val=-1)
-    trn_lm, val_lm, _ = data_puller.get('imdb', supervised=False, trim=Params.quick)
-    wiki_trn_lm, wiki_val_lm, itos = data_puller.get('wikitext', supervised=False, trim=Params.quick, merge_vocab=Params.max_vocab_wiki)
+    data_puller = DataPuller(debug=False, max_vocab=params.max_vocab_task, min_freq=params.min_vocab_freq, trim_trn=1000, trim_val=-1)
+    trn_lm, val_lm, _ = data_puller.get('imdb', supervised=False, trim=params.quick)
+    wiki_trn_lm, wiki_val_lm, itos = data_puller.get('wikitext', supervised=False, trim=params.quick,
+                                                     merge_vocab=params.max_vocab_wiki, cached=not params.quick)
     vs = len(itos)
 
     """
@@ -569,12 +307,12 @@ if __name__ == '__main__':
         Setting up things for training.
     '''
     bptt = 70
-    bs = Params.bs
+    bs = params.bs
     opt_fn = partial(torch.optim.SGD)  # , betas=params.adam_betas)
 
     # Load the pre-trained model
     parameter_dict = {'itos2': itos2}
-    dps = Params.encoder_drops
+    dps = params.encoder_drops
     encargs = {'ntoken': new_w.shape[0],
                'emb_sz': 400, 'n_hid': 1150,
                'n_layers': 3, 'pad_token': 0,
@@ -582,60 +320,68 @@ if __name__ == '__main__':
                'wdrop': dps[2], 'dropoute': dps[3], 'dropouth': dps[4]}
 
     lm = LanguageModel(parameter_dict, device, _wgts_e=wgts_enc if PRETRAINED else None, _wgts_d=wgts_dec, _encargs=encargs)
-    opt = make_opt(lm, opt_fn, lr=Params.lr.init)
+    opt = make_opt(lm, opt_fn, lr=params.lr.init)
     loss_main_fn = func.cross_entropy
     loss_aux_fn = func.cross_entropy
 
     # Make data
     data_fn_unidomain = partial(text.LanguageModelLoader, bs=bs, bptt=bptt)
-    data_imdb = {'train': np.concatenate(trn_lm), 'valid': np.concatenate(val_lm)}
-    data_wiki = {'train': np.concatenate(wiki_trn_lm), 'valid': np.concatenate(wiki_val_lm)}
+    data_train = {[np.concatenate(trn_lm), np.concatenate(wiki_trn_lm)]}
+    data_valid = {[np.concatenate(val_lm)], np.concatenate(wiki_val_lm)}
+    data = {'train': data_train, 'valid': data_valid}
     data_fn = partial(DomainAgnosticSampler, data_fn=data_fn_unidomain)
 
     # Set up lr and freeze stuff
     for grp in opt.param_groups:
         grp['lr'] = 0.0
-    opt.param_groups[3]['lr'] = Params.lr.init
-    opt.param_groups[4]['lr'] = Params.lr.init
+    opt.param_groups[3]['lr'] = params.lr.init
+    opt.param_groups[4]['lr'] = params.lr.init
 
     # lr_args = {'batches':, 'cycles': 1}
-    lr_args = {'iterations': len(data_fn(data_a=data_wiki['train'], data_b=data_imdb['train'])),
-               'cut_frac': Params.lr.sltr_cutfrac, 'ratio': Params.lr.sltr_ratio}
+    lr_args = {'iterations': len(data_fn(data=data['train'])),
+               'cut_frac': params.lr.sltr_cutfrac, 'ratio': params.lr.sltr_ratio}
     lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.SlantedTriangularLR)
 
     # Find places to save model
     save_dir = mt_save_dir(DUMP_PATH / 'models', _newdir=True) if not SAFE_MODE else ''
+    save_fnames = {'torch_stuff':
+                       {'hightrn':
+                            {'model': 'unsup_model_hightrn.torch',
+                             'enc': 'unsup_model_hightrn_enc.torch'},
+                        'lowaux':
+                            {'model': 'unsup_model_lowaux.torch',
+                             'enc': 'unsup_model_lowaux_enc.torch'}}}
 
     if not SAFE_MODE:
         # Start to put permanent things there, like the itos
         mt_save(save_dir,
                 pickle_stuff=[tosave('itos.pkl', itos)])
 
-    args = {'epochs': 1, 'weight_decay': Params.weight_decay, 'data_a': data_imdb, 'data_b': data_wiki,
+    args = {'epochs': 1, 'weight_decay': params.weight_decay, 'data': data,
             'device': device, 'opt': opt, 'loss_main_fn': loss_main_fn, 'loss_aux_fn': loss_aux_fn,
             'train_fn': lm, 'train_aux_fn': lm.domain, 'predict_fn': lm.predict, 'data_fn': data_fn, 'model': lm,
             'eval_fn': _eval, 'eval_aux_fn': _eval, 'batch_start_hook': partial(mtlp.reset_hidden, lm),
-            'clip_grads_at': Params.clip_grads_at, 'lr_schedule': lr_schedule, 'loss_aux_scale': Params.loss_scale,
-            'save_dir': save_dir, 'save_best': not SAFE_MODE, 'save_params': Params}
+            'clip_grads_at': params.clip_grads_at, 'lr_schedule': lr_schedule, 'loss_aux_scale': params.loss_scale,
+            'save_dir': save_dir, 'save_best': not SAFE_MODE, 'save_params': params, 'save_fnames': save_fnames}
 
     '''
         Actual training
     '''
     # print("Time taken to get everything so far done")
-    traces_start = generic_loop(**args)
+    traces_start = dann_loop(**args)
 
     # Now unfreeze all layers and apply discr
     for grp in opt.param_groups:
-        grp['lr'] = Params.lr.init
+        grp['lr'] = params.lr.init
 
-    lr_dscr = lambda optim, lr, fctr=Params.lr.dscr: [lr / (fctr ** p_grp) for p_grp in range(len(optim.param_groups))[::-1]]
-    update_lr(opt, lr_dscr(opt, Params.lr.init))
+    lr_dscr = lambda optim, lr, fctr=params.lr.dscr: [lr / (fctr ** p_grp) for p_grp in range(len(optim.param_groups))[::-1]]
+    update_lr(opt, lr_dscr(opt, params.lr.init))
 
     if DEBUG:
         print([x['lr'] for x in opt.param_groups])
 
-    lr_args = {'iterations': len(data_fn(data_a=data_wiki['train'], data_b=data_imdb['train'])) * 15,
-               'cut_frac': Params.lr.sltr_cutfrac, 'ratio': Params.lr.sltr_ratio}
+    lr_args = {'iterations': len(data_fn(data=data['train'])) * 15,
+               'cut_frac': params.lr.sltr_cutfrac, 'ratio': params.lr.sltr_ratio}
     lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.SlantedTriangularLR)
     args['save_above_trn'] = np.max(traces_start[0])
     # args['save_above_aux'] = np.min(traces_start[2][2:])  # Not updating this var since we ignore the DANN acc of the first few epochs anyway
@@ -644,7 +390,7 @@ if __name__ == '__main__':
     args['epoch_count'] = 1
     args['notify'] = True
 
-    traces_main = generic_loop(**args)
+    traces_main = dann_loop(**args)
     traces = [a + b for a, b in zip(traces_start, traces_main)]
 
     # Dumping stuff
@@ -652,7 +398,7 @@ if __name__ == '__main__':
         mt_save(save_dir, message=MESSAGE,
                 torch_stuff=[tosave('unsup_model_final.torch', lm.state_dict()),
                              tosave('unsup_model_enc_final.torch', lm.encoder.state_dict())],
-                pickle_stuff=[tosave('final_unsup_traces.pkl', traces), tosave('unsup_options.pkl', Params)])
+                pickle_stuff=[tosave('final_unsup_traces.pkl', traces), tosave('unsup_options.pkl', params)])
 
     # Interpreting Traces
     trn_best = np.max(traces[0])
