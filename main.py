@@ -25,7 +25,7 @@ os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 from fastai import text, core, lm_rnn
 
 
-DEVICE = 'cuda:2'
+DEVICE = 'cuda:0'
 KNOWN_DATASETS = ['imdb', 'wikitext']
 
 device = torch.device(DEVICE)
@@ -52,7 +52,7 @@ PRE_LM_PATH = PRE_PATH / 'fwd_wt103.h5'
 class DomainAgnosticSampler:
     """ Sample data for language model training from two different domains in one batch. """
 
-    def __init__(self, data_fn: Callable, data: Tuple[Union[list, np.ndarray], Union[list, np.ndarray]]):
+    def __init__(self, data: Tuple[Union[list, np.ndarray], Union[list, np.ndarray]], data_fn: Callable):
         """
             Here, data_fn would be something like
                 `partial(text.LanguageModelLoader, bs=bs, bptt=bptt)`
@@ -62,8 +62,8 @@ class DomainAgnosticSampler:
         """
         data_a, data_b = data
         self.args = {'data_fn': data_fn, 'data_a': data_a, 'data_b': data_b}
-        self.reset(**self.args)
         self.itera, self.iterb = iter([]), iter([])
+        self.reset(**self.args)
 
     def reset(self, data_fn, data_a, data_b):
         self.itera = iter(data_fn(data_a))
@@ -200,8 +200,9 @@ class LanguageModel(nn.Module):
         self.linear_dom = CustomLinear(layers=params.domclas_layers, drops=params.domclas_drops).to(self.device)
         self.encoder.reset()
 
-    def forward(self, x):
-        x_enc = self.encoder(x)
+    def forward(self, x, d):
+        """ d is not used (only so the loop remains same b/w phase 2 and phase 3 models) """
+        x_enc = self.encoder(x, d)
         return self.linear_dec(x_enc)
 
     def domain(self, x_enc):
@@ -261,6 +262,7 @@ if __name__ == '__main__':
 
     params.message = MESSAGE
     params.quick = QUICK
+    params.datasets = DATASETS
 
     if DEBUG:
         print("Pulling data from disk")
@@ -309,6 +311,8 @@ if __name__ == '__main__':
     bptt = 70
     bs = params.bs
     opt_fn = partial(torch.optim.SGD)  # , betas=params.adam_betas)
+    l_a, l_b = len(text.LanguageModelLoader(trn_lm, bs=bs, bptt=bptt)), len(text.LanguageModelLoader(wiki_trn_lm, bs=bs, bptt=bptt))
+    weights = torch.tensor([l_a/float(l_a+l_b), l_b/float(l_a+l_b)][::-1], dtype=torch.long)
 
     # Load the pre-trained model
     parameter_dict = {'itos2': itos2}
@@ -322,7 +326,7 @@ if __name__ == '__main__':
     lm = LanguageModel(parameter_dict, device, _wgts_e=wgts_enc if PRETRAINED else None, _wgts_d=wgts_dec, _encargs=encargs)
     opt = make_opt(lm, opt_fn, lr=params.lr.init)
     loss_main_fn = func.cross_entropy
-    loss_aux_fn = func.cross_entropy
+    loss_aux_fn = nn.CrossEntropyLoss(weights)
 
     # Make data
     data_fn_unidomain = partial(text.LanguageModelLoader, bs=bs, bptt=bptt)
@@ -343,7 +347,7 @@ if __name__ == '__main__':
     lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.SlantedTriangularLR)
 
     # Find places to save model
-    save_dir = mt_save_dir(DUMP_PATH / 'models', _newdir=True) if not SAFE_MODE else ''
+    save_dir = mt_save_dir(DUMP_PATH / '_'.join(DATASETS), _newdir=True) if not SAFE_MODE else ''
     save_fnames = {'torch_stuff':
                        {'hightrn':
                             {'model': 'unsup_model_hightrn.torch',
@@ -362,7 +366,7 @@ if __name__ == '__main__':
             'train_fn': lm, 'train_aux_fn': lm.domain, 'predict_fn': lm.predict, 'data_fn': data_fn, 'model': lm,
             'eval_fn': _eval, 'eval_aux_fn': _eval, 'batch_start_hook': partial(mtlp.reset_hidden, lm),
             'clip_grads_at': params.clip_grads_at, 'lr_schedule': lr_schedule, 'loss_aux_scale': params.loss_scale,
-            'save_dir': save_dir, 'save_best': not SAFE_MODE, 'save_params': params, 'save_fnames': save_fnames}
+            'save_dir': save_dir, 'save': not SAFE_MODE, 'save_params': params, 'save_fnames': save_fnames}
 
     '''
         Actual training

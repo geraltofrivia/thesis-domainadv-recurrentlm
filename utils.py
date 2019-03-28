@@ -315,8 +315,9 @@ def dann_loop(epochs: int,
             for x, y, y_aux in tqdm(val_dl):
                 _x = torch.tensor(x, dtype=torch.long, device=device)
                 _y = torch.tensor(y, dtype=torch.long, device=device)
+                _y_aux = torch.tensor(y_aux, dtype=torch.long, device=device)
 
-                y_pred = predict_fn(_x)[0]
+                y_pred = predict_fn(_x, _y_aux)[0]
 
                 per_epoch_vl_acc.append(eval_fn(y_pred, _y).item())
 
@@ -350,7 +351,7 @@ def dann_loop(epochs: int,
 
             # Adding epoch info along with options
             if save_params:
-                save_params['epoch'] = e
+                save_params.epoch = e
             else:
                 save_params = {'epoch': e}
 

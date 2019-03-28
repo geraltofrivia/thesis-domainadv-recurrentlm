@@ -44,7 +44,7 @@ Our code does look like we reverse grads. **It should, we checked the testbench*
 # March 26th Code Refactoring
 
 1. Figure out weighted cross entropy for phase 3
-2. What happens during phase 2 when one dataset is smaller than other 
+2. What happens during phase 2 when one dataset is smaller than other (data iter thing)
 3. Model saving and these managements
 4. How to specify in phase 3 to load a phase 2 model or not?
     -> Hack, run a phase 2 with no training? (id space management)
