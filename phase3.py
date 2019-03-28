@@ -181,7 +181,7 @@ if __name__ == "__main__":
     PRETRAINED = args['pretrained']
     MODEL_SUFFIX = args['modelsuffix']
     SAFE_MODE = args['safemode']
-    UNSUP_MODEL_DIR = PATH / 'models' / MODEL_NUM
+    UNSUP_MODEL_DIR = PATH / 'models' / str(MODEL_NUM)
     DATASETS = args['datasets'].split(',')
 
     assert MODEL_SUFFIX in ['_lowaux', '_hightrn', '', '_final'], 'Incorrect Suffix given with which to load model'
@@ -205,19 +205,27 @@ if __name__ == "__main__":
         trn_texts_a = trn_texts_a[trn_labels_a < 2]
         trn_labels_a = trn_labels_a[trn_labels_a < 2]
 
-    trn_texts_a = np.array([[stoi2.get(w, 0) for w in para] for para in trn_texts_a])
-    val_texts_a = np.array([[stoi2.get(w, 0) for w in para] for para in val_texts_a])
+    # trn_texts_a = np.array([[stoi2.get(w, 0) for w in para] for para in trn_texts_a])
+    # val_texts_a = np.array([[stoi2.get(w, 0) for w in para] for para in val_texts_a])
 
-    if len(DATASETS) > 1:
-        trn_texts_b, trn_labels_b, val_texts_b, val_labels_b, itos = data_puller.get(DATASETS[1], supervised=True,
-                                                                                     trim=params.quick, merge_vocab=params.max_vocab_wiki)
+    trn_texts_b, trn_labels_b, val_texts_b, val_labels_b, itos = data_puller.get(DATASETS[1], supervised=True,
+                                                                                 trim=params.quick, merge_vocab=params.max_vocab_wiki)
 
-        if DATASETS[1] == 'imdb':
-            trn_texts_b = trn_texts_b[trn_labels_b < 2]
-            trn_labels_b = trn_labels_b[trn_labels_b < 2]
+    if DATASETS[1] == 'imdb':
+        trn_texts_b = trn_texts_b[trn_labels_b < 2]
+        trn_labels_b = trn_labels_b[trn_labels_b < 2]
 
-        trn_texts_b = np.array([[stoi2.get(w, 0) for w in para] for para in trn_texts_b])
-        val_texts_b = np.array([[stoi2.get(w, 0) for w in para] for para in val_texts_b])
+        # trn_texts_b = np.array([[stoi2.get(w, 0) for w in para] for para in trn_texts_b])
+        # val_texts_b = np.array([[stoi2.get(w, 0) for w in para] for para in val_texts_b])
+
+    '''
+        Transform words from data_puller.itos vocabulary to that of the pretrained model (__main__.itos2)
+    '''
+    _itos2 = dict(enumerate(itos2))
+    trn_texts_a = [[stoi2[_itos2.get(i, '_unk_')] for i in sent] for sent in trn_texts_a]
+    val_texts_a = [[stoi2[_itos2.get(i, '_unk_')] for i in sent] for sent in val_texts_a]
+    trn_texts_b = [[stoi2[_itos2.get(i, '_unk_')] for i in sent] for sent in trn_texts_b]
+    val_texts_b = [[stoi2[_itos2.get(i, '_unk_')] for i in sent] for sent in val_texts_b]
 
     '''
         Make model
@@ -263,7 +271,7 @@ if __name__ == "__main__":
             'train_fn': clf, 'predict_fn': clf.predict, 'train_aux_fn': clf.domain,
             'epoch_end_hook': epoch_end_hook, 'weight_decay': params.weight_decay,
             'clip_grads_at': params.clip_grads_at, 'lr_schedule': lr_schedule,
-            'loss_scale': params.loss_scale if len(DATASETS) > 1 else 0,
+            'loss_aux_scale': params.loss_scale if len(DATASETS) > 1 else 0,
             'data_fn': data_fn, 'eval_fn': _eval, 'eval_aux_fn': _eval,
             'save': not SAFE_MODE, 'save_params': params, 'save_dir': UNSUP_MODEL_DIR, 'save_fnames': save_fnames}
 

@@ -160,7 +160,7 @@ class CustomLinear(lm_rnn.PoolingLinearClassifier):
         x = torch.cat([output[-1], mxpool, avgpool], 1)
         for i, l in enumerate(self.layers):
             l_x = l(x)
-            if i != len(self.layers) -1:
+            if i != len(self.layers) - 1:
                 x = func.relu(l_x)
             else:
                 x = torch.sigmoid(l_x)

@@ -125,6 +125,7 @@ class DataPuller:
                 val_texts = np.load(cache_path/'val_texts.npy')
                 val_labels = np.load(cache_path/'val_labels.npy')
                 self.itos = pickle.load(open(cache_path/'itos.pkl', 'rb'))
+                self.stoi = {v: k for k, v in enumerate(self.itos)}
 
                 self.processed.append(src)
 
@@ -155,6 +156,7 @@ class DataPuller:
                 val_texts = np.load(cache_path/f'val_texts_{src}.npy')
                 val_labels = np.load(cache_path/f'val_labels_{src}.npy')
                 self.itos = pickle.load(open(cache_path/f'itos_{src}.pkl', 'rb'))
+                self.stoi = {v: k for k, v in enumerate(self.itos)}
 
                 self.processed.append(src)
 
@@ -208,7 +210,9 @@ class DataPuller:
             pickle.dump({'trim': trim}, open(cache_path/'options.pkl', 'wb+'))
 
         # Cache things if enabled and this is the second dataset we're processing
-            cache_path = Path(CACHED_PATH_TEMPLATE % {'src': src})
+        if cached and len(self.processed) == 1:
+
+            cache_path = Path(CACHED_PATH_TEMPLATE % {'src': self.processed[0]})
             np.save(cache_path / f'trn_texts_{src}.npy', trn_texts)
             np.save(cache_path / f'trn_labels_{src}.npy', trn_labels)
             np.save(cache_path / f'val_texts_{src}.npy', val_texts)
@@ -266,16 +270,15 @@ class DataPuller:
         if self.debug:
             print(f"Pulled Wikidata from disk with {len(trn_texts)} train, {len(val_texts)} valid and {len(tst_texts)} test samples")
 
-        # trn <- val + trn
-        trn_texts = np.concatenate([trn_texts, val_texts])
+        trn_texts = trn_texts + val_texts
 
         # For code consistency's sake, we refer to tst as val here on
-        val_texts = tst_texts
+        #         val_texts = tst_texts
 
         trn_lbl = [0 for _ in trn_texts]
-        val_lbl = [0 for _ in val_texts]
+        tst_lbl = [0 for _ in tst_texts]
 
-        return self.__common_preprocessing_(trn_texts, trn_lbl, val_texts, val_lbl)
+        return self.__common_preprocessing_(trn_texts, trn_lbl, tst_texts, tst_lbl)
 
     def __common_preprocessing_(self, trn_texts: Union[List[str], np.ndarray], trn_lbl: Union[List[int], np.ndarray],
                                 val_texts: Union[List[str], np.ndarray], val_lbl: Union[List[int], np.ndarray], _distribute: bool = True) \
@@ -312,8 +315,7 @@ class DataPuller:
             itos = [o for o, c in freq.most_common(self.max_vocab) if c > self.min_freq]
             itos.insert(0, '_pad_')
             itos.insert(0, '_unk_')
-            stoi = {v: k for k, v in enumerate(itos)}
-            self.itos, self.stoi = itos.copy(), stoi.copy()
+            self.itos, self.stoi = itos.copy(), {v: k for k, v in enumerate(itos)}
 
         else:
 
@@ -383,13 +385,13 @@ class DataPuller:
             raw_txt.append(' '.join(line.split()[1:]))
         return np.array(raw_txt), np.array(raw_lbl)
 
-    def __wiki_pull_from_disk__(self, path: Path)->tuple:
+    def __wiki_pull_from_disk__(self, path: Path)->list:
         texts = []
         for idx, label in enumerate(WIKI_CLASSES):
             # noinspection PyTypeChecker
             with open(path / label, encoding='utf-8') as f:
                 texts.append([sent.strip() for sent in f.readlines() if self.__is_valid_sent__(sent)])
-        return tuple(texts)
+        return texts
 
     @staticmethod
     def __is_valid_sent__(x: str)->bool:
