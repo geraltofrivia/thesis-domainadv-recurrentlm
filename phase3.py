@@ -143,9 +143,10 @@ class TextClassifier(nn.Module):
     def forward(self, x: torch.tensor, domain: torch.tensor):
         """ x is bs, sl; dom is bs indicating the task. """
 
-        bs, sl = x.shape
         # Encoding all the data
         x_proc = self.encoder(x.transpose(1, 0))
+
+        sl, bs, _ = x_proc[0][0].shape
 
         score = []
         for pos, dom in enumerate(domain):
@@ -161,28 +162,44 @@ class TextClassifier(nn.Module):
                 NOTE: This shit might be slow                     
             """
             x_proc_pos = ([layer_op[:, pos].view(sl, 1, -1) for layer_op in x_proc[0]],
-                     [layer_op[:, pos].view(sl, 1, -1) for layer_op in x_proc[1]])
+                         [layer_op[:, pos].view(sl, 1, -1) for layer_op in x_proc[1]])
             score.append(self.linear[dom.item()](x_proc_pos)[0])
-
-        # score = torch.cat(score)
 
         return score, x_proc
 
     def domain(self, x_proc):
+        # @TODO: FIX
+        print(x_proc)
         x_proc = list(x_proc)
         x_proc[1] = [GradReverse.apply(enc_tensr) for enc_tensr in x_proc[1]]
         return self.domain_clf(x_proc)[0]
 
-    def predict(self, x):
+    def predict(self, x, d):
         with torch.no_grad():
             self.eval()
-            predicted, _ = self.forward(x)
+            predicted, _ = self.forward(x, d)
             self.train()
             return predicted
 
 
 def epoch_end_hook() -> None:
     lr_schedule.reset()
+
+
+def custom_argmax(x: List[torch.Tensor], dim: int = 1) -> torch.Tensor:
+    """ Expects a list of tensors, and computes individual's argmax"""
+    return torch.cat([pred.argmax(dim=dim) for pred in x])
+
+
+# noinspection PyUnresolvedReferences
+def _list_eval(y_pred, y_true):
+    """
+        Expects a batch of input
+
+        :param y_pred: tensor of shape (b, nc)
+        :param y_true: tensor of shape (b, 1)
+    """
+    return torch.mean((custom_argmax(y_pred, dim=1) == y_true).float())
 
 
 # noinspection PyUnresolvedReferences
@@ -193,6 +210,7 @@ def _eval(y_pred, y_true):
         :param y_pred: tensor of shape (b, nc)
         :param y_true: tensor of shape (b, 1)
     """
+    print(y_pred[0])
     return torch.mean((torch.argmax(y_pred, dim=1) == y_true).float())
 
 
@@ -209,7 +227,9 @@ def mulittask_classification_loss(y_pred: list, y_true:  torch.Tensor ,loss_fn: 
     :param loss_fn: (torch.nn.Module or a function) which calculates loss given a y_true and y_pred
     :return: the loss value (torch.Tensor)
     """
-    return torch.sum(torch.cat([loss_fn(_y_pred, y_true[i]) for i, _y_pred in enumerate(y_pred)]))
+    losses = [loss_fn(_y_pred.view(1, -1), y_true[i].unsqueeze(0)).view(-1)
+              for i, _y_pred in enumerate(y_pred)]
+    return torch.sum(torch.cat(losses))
 
 
 if __name__ == "__main__":
@@ -262,18 +282,12 @@ if __name__ == "__main__":
         trn_texts_a = trn_texts_a[trn_labels_a < 2]
         trn_labels_a = trn_labels_a[trn_labels_a < 2]
 
-    # trn_texts_a = np.array([[stoi2.get(w, 0) for w in para] for para in trn_texts_a])
-    # val_texts_a = np.array([[stoi2.get(w, 0) for w in para] for para in val_texts_a])
-
     trn_texts_b, trn_labels_b, val_texts_b, val_labels_b, itos = data_puller.get(DATASETS[1], supervised=True,
                                                                                  trim=params.quick, merge_vocab=params.max_vocab_wiki)
 
     if DATASETS[1] == 'imdb':
         trn_texts_b = trn_texts_b[trn_labels_b < 2]
         trn_labels_b = trn_labels_b[trn_labels_b < 2]
-
-        # trn_texts_b = np.array([[stoi2.get(w, 0) for w in para] for para in trn_texts_b])
-        # val_texts_b = np.array([[stoi2.get(w, 0) for w in para] for para in val_texts_b])
 
     '''
         Transform words from data_puller.itos vocabulary to that of the pretrained model (__main__.itos2)
@@ -288,7 +302,6 @@ if __name__ == "__main__":
         Make model
     '''
     dps = list(params.encoder_dropouts)
-    # enc_wgts = torch.load(LM_PATH, map_location=lambda storage, loc: storage)
     enc_wgts = torch.load(UNSUP_MODEL_DIR / ('unsup_model_enc' + MODEL_SUFFIX + '.torch'), map_location=lambda storage, loc: storage)
     n_classes = [KNOWN_DATASETS[d] for d in DATASETS]
     clf = TextClassifier(device, len(itos2), dps, enc_wgts=enc_wgts if PRETRAINED else None, n_classes=n_classes)
@@ -329,7 +342,7 @@ if __name__ == "__main__":
             'epoch_end_hook': epoch_end_hook, 'weight_decay': params.weight_decay,
             'clip_grads_at': params.clip_grads_at, 'lr_schedule': lr_schedule,
             'loss_aux_scale': params.loss_scale if len(DATASETS) > 1 else 0,
-            'data_fn': data_fn, 'eval_fn': _eval, 'eval_aux_fn': _eval,
+            'data_fn': data_fn, 'eval_fn': _list_eval, 'eval_aux_fn': _eval,
             'save': not SAFE_MODE, 'save_params': params, 'save_dir': UNSUP_MODEL_DIR, 'save_fnames': save_fnames}
 
     '''

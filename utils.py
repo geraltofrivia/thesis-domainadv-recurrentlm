@@ -278,7 +278,7 @@ def dann_loop(epochs: int,
 
                 # B. Aux stuff
                 y_pred_aux = train_aux_fn(x_proc)
-                loss_aux = loss_aux_fn(y_pred, _y)
+                loss_aux = loss_aux_fn(y_pred_aux, _y_aux)
 
                 # C. Add losses with scale.
                 loss = loss_main + (loss_aux_scale * loss_aux)
@@ -319,7 +319,7 @@ def dann_loop(epochs: int,
 
                 y_pred = predict_fn(_x, _y_aux)[0]
 
-                per_epoch_vl_acc.append(eval_fn(y_pred, _y).item())
+                per_epoch_vl_acc.append(eval_fn(y_pred=y_pred, y_true=_y).item())
 
         # Bookkeep
         train_acc_main.append(np.mean(per_epoch_tr_acc_main))

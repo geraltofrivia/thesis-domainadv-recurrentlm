@@ -222,6 +222,13 @@ class DataPuller:
 
         # Finally, return elements depending on `supervised` label | And log what we just accomplished
         self.processed.append(src)
+
+        # if lists, conv to arrays
+        trn_texts = np.array(trn_texts) if type(trn_texts) is list else trn_texts
+        trn_labels = np.array(trn_labels) if type(trn_labels) is list else trn_labels
+        val_texts = np.array(val_texts) if type(val_texts) is list else val_texts
+        val_labels = np.array(val_labels) if type(val_labels) is list else val_labels
+
         if supervised:
             return trn_texts, trn_labels, val_texts, val_labels, self.itos.copy()
         else:
