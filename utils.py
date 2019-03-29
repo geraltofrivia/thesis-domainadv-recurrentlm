@@ -388,7 +388,7 @@ def dann_loop(epochs: int,
 
                 # Adding epoch info along with options
                 if save_params:
-                    save_params['epoch'] = e
+                    save_params.epoch = e
                 else:
                     save_params = {'epoch': e}
 

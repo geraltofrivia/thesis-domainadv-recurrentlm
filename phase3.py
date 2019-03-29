@@ -169,7 +169,7 @@ class TextClassifier(nn.Module):
 
     def domain(self, x_proc):
         # @TODO: FIX
-        print(x_proc)
+        # print(x_proc)
         x_proc = list(x_proc)
         x_proc[1] = [GradReverse.apply(enc_tensr) for enc_tensr in x_proc[1]]
         return self.domain_clf(x_proc)[0]
@@ -210,12 +210,12 @@ def _eval(y_pred, y_true):
         :param y_pred: tensor of shape (b, nc)
         :param y_true: tensor of shape (b, 1)
     """
-    print(y_pred[0])
+    # print(y_pred[0])
     return torch.mean((torch.argmax(y_pred, dim=1) == y_true).float())
 
 
 # noinspection PyUnresolvedReferences
-def mulittask_classification_loss(y_pred: list, y_true:  torch.Tensor ,loss_fn: Union[torch.nn.modules.loss, Callable])->torch.Tensor:
+def mulittask_classification_loss(y_pred: list, y_true: torch.Tensor, loss_fn: Union[torch.nn.Module, Callable]) -> torch.Tensor:
     """
         Accepts different sized y_preds where each element can have [1, _] shapes.
         Provide a loss function using our regular -partial- thing.
