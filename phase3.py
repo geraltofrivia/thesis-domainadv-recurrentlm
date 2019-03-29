@@ -52,6 +52,33 @@ KNOWN_DATASETS = {'imdb': 2, 'trec': 6}
 '''
 
 
+class FakeBatchNorm1d(nn.Module):
+    """
+        Class which keeps its interface same b/w batchnorm1d and doesn't do shit.
+        Needed for when I send sliced encoded tensors to classifier to perform pointwise classification.
+    """
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        return x
+
+
+class CustomLinearBlock(text.LinearBlock):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.bn = FakeBatchNorm1d()
+
+
+class CustomPoolingLinearClassifier(text.PoolingLinearClassifier):
+    """ Overwriting lm_rnn's PoolingLinearClassifier so it uses CustomLinearBlock (with no batchnorm)"""
+    def __init__(self, layers, drops):
+        super().__init__(layers, drops)
+        self.layers = nn.ModuleList([
+            CustomLinearBlock(layers[i], layers[i + 1], drops[i]) for i in range(len(layers) - 1)])
+
+
 class CustomEncoder(lm_rnn.MultiBatchRNN):
     @property
     def layers(self):
@@ -101,7 +128,7 @@ class TextClassifier(nn.Module):
 
                 0.4, 0.1 are drops at various layers
         '''
-        self.linear = [text.PoolingLinearClassifier(layers=[400 * 3, 50, cls], drops=[dps[4], 0.1]).to(self.device)
+        self.linear = [CustomPoolingLinearClassifier(layers=[400 * 3, 50, cls], drops=[dps[4], 0.1]).to(self.device)
                        for cls in n_classes]
         self.domain_clf = p2.CustomLinear(layers=p2params.domclas_layers, drops=p2params.domclas_drops).to(self.device)
         self.encoder.reset()
@@ -114,14 +141,28 @@ class TextClassifier(nn.Module):
         return torch.nn.ModuleList(layers)
 
     def forward(self, x: torch.tensor, domain: torch.tensor):
-        """ x is sl*bs; dom is bs indicating the task. """
+        """ x is bs, sl; dom is bs indicating the task. """
 
+        bs, sl = x.shape
         # Encoding all the data
         x_proc = self.encoder(x.transpose(1, 0))
 
         score = []
-        for dom in domain:
-            score.append(self.linear[dom.item()](x_proc)[0])
+        for pos, dom in enumerate(domain):
+            """
+                Right now, x_proc looks like ( [(sl, bs, hdim)*n_layers_enc], [(sl, bs, hdim)*n_layers_enc)] 
+                    for dropped and non dropped outputs respectively.
+                
+                Depending on {dom.item()}^th task on {i}^th position,
+                We slice from x_proc a tensor of (sl, 1, hdim) shape based on i, and feed it to the {dom}'th decoder.
+            
+                Finally, we concat the outputs in a nice little list and pretend nothing happened [:
+                
+                NOTE: This shit might be slow                     
+            """
+            x_proc_pos = ([layer_op[:, pos].view(sl, 1, -1) for layer_op in x_proc[0]],
+                     [layer_op[:, pos].view(sl, 1, -1) for layer_op in x_proc[1]])
+            score.append(self.linear[dom.item()](x_proc_pos)[0])
 
         score = torch.cat(score)
 
