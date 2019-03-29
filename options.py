@@ -26,7 +26,11 @@ class Phase2:
     bs = 20
     loss_scale = 5.0
 
+
 class Phase3:
+    lr = FancyDict(
+        init=0.003,
+    )
     encoder_dropouts = np.asarray([0.4, 0.5, 0.05, 0.3, 0.4]) * 0.5
     bs = 24
     adam_betas = (0.7, 0.99)

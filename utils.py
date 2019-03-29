@@ -425,3 +425,6 @@ def dann_loop(epochs: int,
             send_notification(data=saved_info, key=notify_key)
 
     return train_acc_main, val_acc, train_acc_aux, train_loss_main, train_loss_aux, lrs
+
+
+TRACES_FORMAT = {name: i for i, name in enumerate(['train_acc_main', 'val_acc', 'train_acc_aux', 'train_loss_main', 'train_loss_aux', 'lrs'])}

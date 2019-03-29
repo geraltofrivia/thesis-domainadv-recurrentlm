@@ -177,7 +177,7 @@ class TextClassifier(nn.Module):
     def predict(self, x, d):
         with torch.no_grad():
             self.eval()
-            predicted, _ = self.forward(x, d)
+            predicted = self.forward(x, d)
             self.train()
             return predicted
 
@@ -313,8 +313,8 @@ if __name__ == "__main__":
     loss_main_fn = partial(mulittask_classification_loss, loss_fn=torch.nn.CrossEntropyLoss())
     loss_aux_fn = torch.nn.CrossEntropyLoss()
     opt_fn = partial(optim.Adam, betas=params.adam_betas)
-    opt = make_opt(clf, opt_fn, lr=0.0)
-    opt.param_groups[-1]['lr'] = 0.01
+    opt = make_opt(clf, opt_fn, lr=params.lr.init)
+    # opt.param_groups[-1]['lr'] = 0.01
 
     # Make data
     # @TODO: make this code compatible with one dataset (no dann)
@@ -355,58 +355,61 @@ if __name__ == "__main__":
     # opt.param_groups[-1]['lr'] = 0.01
     traces = utils.dann_loop(**args)
 
-    opt.param_groups[-1]['lr'] = 0.01
-    opt.param_groups[-2]['lr'] = 0.005
+    # opt.param_groups[-1]['lr'] = 0.01
+    # opt.param_groups[-2]['lr'] = 0.005
     lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
     args['lr_schedule'] = lr_schedule
-    args['save_above'] = np.max(traces[TRACES_FORMAT['train_acc']])
+    args['save_above_trn'] = np.max(traces[utils.TRACES_FORMAT['train_acc_main']])
     args['epoch_count'] += 1
     traces_new = utils.dann_loop(**args)
     traces = [a+b for a, b in zip(traces, traces_new)]
 
-    opt.param_groups[-1]['lr'] = 0.01
-    opt.param_groups[-2]['lr'] = 0.005
-    opt.param_groups[-3]['lr'] = 0.001
+    # opt.param_groups[-1]['lr'] = 0.01
+    # opt.param_groups[-2]['lr'] = 0.005
+    # opt.param_groups[-3]['lr'] = 0.001
     lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
     args['lr_schedule'] = lr_schedule
-    args['save_above'] = np.max(traces[TRACES_FORMAT['train_acc']])
+    args['save_above_trn'] = np.max(traces[utils.TRACES_FORMAT['train_acc_main']])
     args['epoch_count'] += 1
     traces_new = utils.dann_loop(**args)
     traces = [a+b for a, b in zip(traces, traces_new)]
 
-    opt.param_groups[-1]['lr'] = 0.01
-    opt.param_groups[-2]['lr'] = 0.005
-    opt.param_groups[-3]['lr'] = 0.001
-    opt.param_groups[-4]['lr'] = 0.001
+    # opt.param_groups[-1]['lr'] = 0.01
+    # opt.param_groups[-2]['lr'] = 0.005
+    # opt.param_groups[-3]['lr'] = 0.001
+    # opt.param_groups[-4]['lr'] = 0.001
     lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
     args['lr_schedule'] = lr_schedule
-    args['save_above'] = np.max(traces[TRACES_FORMAT['train_acc']])
+    args['save_above_trn'] = np.max(traces[utils.TRACES_FORMAT['train_acc_main']])
+    args['save_above_aux'] = np.min(traces[utils.TRACES_FORMAT['train_acc_aux']][2:])
     args['epoch_count'] += 1
     traces_new = utils.dann_loop(**args)
     traces = [a+b for a, b in zip(traces, traces_new)]
 
-    opt.param_groups[-1]['lr'] = 0.01
-    opt.param_groups[-2]['lr'] = 0.005
-    opt.param_groups[-3]['lr'] = 0.001
-    opt.param_groups[-4]['lr'] = 0.001
-    opt.param_groups[-5]['lr'] = 0.001
+    # opt.param_groups[-1]['lr'] = 0.01
+    # opt.param_groups[-2]['lr'] = 0.005
+    # opt.param_groups[-3]['lr'] = 0.001
+    # opt.param_groups[-4]['lr'] = 0.001
+    # opt.param_groups[-5]['lr'] = 0.001
     lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
     args['lr_schedule'] = lr_schedule
-    args['save_above'] = np.max(traces[TRACES_FORMAT['train_acc']])
+    args['save_above_trn'] = np.max(traces[utils.TRACES_FORMAT['train_acc_main']])
+    args['save_above_aux'] = np.min(traces[utils.TRACES_FORMAT['train_acc_aux']][2:])
     args['epoch_count'] += 1
     traces_new = utils.dann_loop(**args)
     traces = [a+b for a, b in zip(traces, traces_new)]
 
-    opt.param_groups[-1]['lr'] = 0.01
-    opt.param_groups[-2]['lr'] = 0.005
-    opt.param_groups[-3]['lr'] = 0.001
-    opt.param_groups[-4]['lr'] = 0.001
-    opt.param_groups[-5]['lr'] = 0.001
+    # opt.param_groups[-1]['lr'] = 0.01
+    # opt.param_groups[-2]['lr'] = 0.005
+    # opt.param_groups[-3]['lr'] = 0.001
+    # opt.param_groups[-4]['lr'] = 0.001
+    # opt.param_groups[-5]['lr'] = 0.001
     lr_args['cycles'] = 15
     args['epochs'] = 15
     lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
     args['lr_schedule'] = lr_schedule
-    args['save_above'] = np.max(traces[TRACES_FORMAT['train_acc']])
+    args['save_above_trn'] = np.max(traces[utils.TRACES_FORMAT['train_acc_main']])
+    args['save_above_aux'] = np.min(traces[utils.TRACES_FORMAT['train_acc_aux']][2:])
     args['epoch_count'] += 1
     args['notify'] = True
 
