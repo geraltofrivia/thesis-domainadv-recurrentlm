@@ -7,8 +7,8 @@
 
 # External Lib imports
 import os
-from typing import List
 from functools import partial
+from typing import List, Union, Callable
 
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 
@@ -164,7 +164,7 @@ class TextClassifier(nn.Module):
                      [layer_op[:, pos].view(sl, 1, -1) for layer_op in x_proc[1]])
             score.append(self.linear[dom.item()](x_proc_pos)[0])
 
-        score = torch.cat(score)
+        # score = torch.cat(score)
 
         return score, x_proc
 
@@ -194,6 +194,22 @@ def _eval(y_pred, y_true):
         :param y_true: tensor of shape (b, 1)
     """
     return torch.mean((torch.argmax(y_pred, dim=1) == y_true).float())
+
+
+# noinspection PyUnresolvedReferences
+def mulittask_classification_loss(y_pred: list, y_true:  torch.Tensor ,loss_fn: Union[torch.nn.modules.loss, Callable])->torch.Tensor:
+    """
+        Accepts different sized y_preds where each element can have [1, _] shapes.
+        Provide a loss function using our regular -partial- thing.
+
+        Eg. lfn = partial(mulittask_classification_loss, loss_fn:torch.nn.CrossEntropyLoss())
+
+    :param y_pred: (list) of tensors where each tensor is of shape (1, _) of length bs
+    :param y_true: (torch.Tensor) of shape (bs,)
+    :param loss_fn: (torch.nn.Module or a function) which calculates loss given a y_true and y_pred
+    :return: the loss value (torch.Tensor)
+    """
+    return torch.sum(torch.cat([loss_fn(_y_pred, y_true[i]) for i, _y_pred in enumerate(y_pred)]))
 
 
 if __name__ == "__main__":
@@ -281,7 +297,7 @@ if __name__ == "__main__":
         Setup things for training (data, loss, opt, lr schedule etc
     '''
     bs = params.bs
-    loss_main_fn = torch.nn.CrossEntropyLoss()
+    loss_main_fn = partial(mulittask_classification_loss, loss_fn=torch.nn.CrossEntropyLoss())
     loss_aux_fn = torch.nn.CrossEntropyLoss()
     opt_fn = partial(optim.Adam, betas=params.adam_betas)
     opt = make_opt(clf, opt_fn, lr=0.0)
