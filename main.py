@@ -364,7 +364,7 @@ if __name__ == '__main__':
     args = {'epochs': 1, 'weight_decay': params.weight_decay, 'data': data,
             'device': device, 'opt': opt, 'loss_main_fn': loss_main_fn, 'loss_aux_fn': loss_aux_fn,
             'train_fn': lm, 'train_aux_fn': lm.domain, 'predict_fn': lm.predict, 'data_fn': data_fn, 'model': lm,
-            'eval_fn': _eval, 'eval_aux_fn': _eval, 'batch_start_hook': partial(mtlp.reset_hidden, lm),
+            'eval_fn': _eval, 'eval_aux_fn': _eval, 'batch_start_hook': partial(mtlp.reset_hidden, lm), 'tasks': 2,
             'clip_grads_at': params.clip_grads_at, 'lr_schedule': lr_schedule, 'loss_aux_scale': params.loss_scale,
             'save_dir': save_dir, 'save': not SAFE_MODE, 'save_params': params, 'save_fnames': save_fnames}
 

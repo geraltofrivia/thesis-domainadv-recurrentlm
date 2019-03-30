@@ -82,10 +82,12 @@ class CustomPoolingLinearClassifier(text.PoolingLinearClassifier):
 class CustomEncoder(lm_rnn.MultiBatchRNN):
     @property
     def layers(self):
-        # TODO: ADD ENCODERR!!!!!!!!!!
-        return torch.nn.ModuleList([torch.nn.ModuleList([self.rnns[0], self.dropouths[0]]),
-                                    torch.nn.ModuleList([self.rnns[1], self.dropouths[1]]),
-                                    torch.nn.ModuleList([self.rnns[2], self.dropouths[2]])])
+        return torch.nn.ModuleList([
+            torch.nn.ModuleList([self.encoder, self.encoder_with_dropout]),
+            torch.nn.ModuleList([self.rnns[0], self.dropouths[0]]),
+            torch.nn.ModuleList([self.rnns[1], self.dropouths[1]]),
+            torch.nn.ModuleList([self.rnns[2], self.dropouths[2]])
+        ])
 
 
 class TextClassifier(nn.Module):
@@ -128,8 +130,8 @@ class TextClassifier(nn.Module):
 
                 0.4, 0.1 are drops at various layers
         '''
-        self.linear = [CustomPoolingLinearClassifier(layers=[400 * 3, 50, cls], drops=[dps[4], 0.1]).to(self.device)
-                       for cls in n_classes]
+        self.linear = torch.nn.ModuleList([CustomPoolingLinearClassifier(layers=[400 * 3, 50, cls], drops=[dps[4], 0.1]).to(self.device)
+                       for cls in n_classes])
         self.domain_clf = p2.CustomLinear(layers=p2params.domclas_layers, drops=p2params.domclas_drops).to(self.device)
         self.encoder.reset()
 
@@ -182,7 +184,10 @@ class TextClassifier(nn.Module):
             return predicted
 
 
-def epoch_end_hook() -> None:
+def epoch_end_hook(opt: torch.optim, lr_schedule: mtlr.LearningRateScheduler) -> None:
+    # @TODO: instead of constant lr, add lr reset recipe here.
+    for pg in opt.param_groups:
+        pg['lr'] = params.lr.init
     lr_schedule.reset()
 
 
@@ -191,11 +196,26 @@ def custom_argmax(x: List[torch.Tensor], dim: int = 1) -> torch.Tensor:
     return torch.cat([pred.argmax(dim=dim) for pred in x])
 
 
+# # noinspection PyUnresolvedReferences
+# def _list_eval(y_pred: list, y_true: torch.Tensor, tasks: int = 1, task_vector: torch.Tensor = None) -> Union[List[np.float], np.float]:
+#     """
+#         Expects y_pred to be a list of tensors, but y_true to be a one tensor.
+#         Also takes tasks as inputs and another tensor which specifies which example belongs to which task
+#
+#         :param y_pred: list of n_batches items each of shape (1, nc_t) where nc_t can have multiple values
+#         :param y_true: tensor of shape (b, 1)
+#     """
+#     acc = torch.mean((custom_argmax(y_pred, dim=1) == y_true).float())
+#     if not tasks > 1 or task_vector is None:
+#         return acc
+#
+#     accs = []
+#     for task in tasks:
+
 # noinspection PyUnresolvedReferences
 def _list_eval(y_pred, y_true):
     """
         Expects a batch of input
-
         :param y_pred: tensor of shape (b, nc)
         :param y_true: tensor of shape (b, 1)
     """
@@ -229,7 +249,7 @@ def mulittask_classification_loss(y_pred: list, y_true: torch.Tensor, loss_fn: U
     """
     losses = [loss_fn(_y_pred.view(1, -1), y_true[i].unsqueeze(0)).view(-1)
               for i, _y_pred in enumerate(y_pred)]
-    return torch.sum(torch.cat(losses))
+    return torch.mean(torch.cat(losses))
 
 
 if __name__ == "__main__":
@@ -339,9 +359,9 @@ if __name__ == "__main__":
     args = {'epochs': 1, 'epoch_count': 0, 'data': data, 'device': device, 'opt': opt,
             'loss_main_fn': loss_main_fn, 'loss_aux_fn': loss_aux_fn, 'model': clf,
             'train_fn': clf, 'predict_fn': clf.predict, 'train_aux_fn': clf.domain,
-            'epoch_end_hook': epoch_end_hook, 'weight_decay': params.weight_decay,
+            'epoch_end_hook': partial(epoch_end_hook, opt=opt, lr_schedule=lr_schedule), 'weight_decay': params.weight_decay,
             'clip_grads_at': params.clip_grads_at, 'lr_schedule': lr_schedule,
-            'loss_aux_scale': params.loss_scale if len(DATASETS) > 1 else 0,
+            'loss_aux_scale': params.loss_scale if len(DATASETS) > 1 else 0, 'tasks': 2,
             'data_fn': data_fn, 'eval_fn': _list_eval, 'eval_aux_fn': _eval,
             'save': not SAFE_MODE, 'save_params': params, 'save_dir': UNSUP_MODEL_DIR, 'save_fnames': save_fnames}
 

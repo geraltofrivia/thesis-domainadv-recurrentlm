@@ -1,7 +1,7 @@
-from tqdm import tqdm
 from typing import Callable, List
 from mytorch.utils.goodies import *
 from mytorch import lriters as mtlr
+from tqdm import tqdm_notebook as tqdm
 
 
 class DomainAgnosticSortishSampler:
@@ -157,6 +157,7 @@ def dann_loop(epochs: int,
               weight_decay: float = 0.0,
               clip_grads_at: float = -1.0,
               lr_schedule: mtlr.LearningRateScheduler = None,
+              tasks: int = 2,
               loss_aux_scale: float = 1.0,
               notify: bool = False,
               notify_key: str = None) -> (list, list, list, list):
@@ -165,6 +166,7 @@ def dann_loop(epochs: int,
         A generic training loop, which based on diff hook fns (defined below), should handle anything given to it.
 
         @TODO: Explain DANN
+        @TODO: Implement ways to have more tasks or sometimes just one task.
 
         The model need not be an nn.Module,
              but should have correctly wired forward and a predict function, and a auxiliary function (DANN)
@@ -190,6 +192,8 @@ def dann_loop(epochs: int,
         and pass it to the model alongwith.
         If the arg is empty, it defaults to -
             save_args = {'torch_stuff': [tosave('model.torch', model.state_dict())]}
+
+
 
     :param epochs: number of epochs to train for
     :param data: data dict (structure specified above)
@@ -222,6 +226,7 @@ def dann_loop(epochs: int,
     :param clip_grads_at: in case you want gradients clipped, send the max val here
     :param lr_schedule: a schedule that is called @ every batch start.
     :param data_fn: a class to which we can pass X and Y, and get an iterator.
+    :param tasks: (int) specifying precisely how many tasks do the networks do (diff tasks represented by y_aux below)
     :param notify: (optional) flag which enables sending notifications to your phones once the loop is done.
     :param notify_key: (optional) the api key to which the notification is to be sent. You can give it here, or in a file (see README.md)
     :return: traces
