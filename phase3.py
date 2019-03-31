@@ -372,8 +372,12 @@ if __name__ == "__main__":
     loss_fns = [torch.nn.CrossEntropyLoss(weight=torch.tensor(w, device=device, dtype=torch.float))
                 for w in task_specific_weights]
     loss_main_fn = partial(mulittask_classification_loss, loss_fn=loss_fns)
-    loss_aux_fn = partial(domain_classifier_loss,
-                          loss_fn=torch.nn.CrossEntropyLoss(torch.tensor(dataset_specific_weights, device=device, dtype=torch.float)))
+    if len(DATASETS) > 1:
+        loss_aux_fn = partial(domain_classifier_loss, loss_fn=torch.nn.CrossEntropyLoss(
+            torch.tensor(dataset_specific_weights, device=device, dtype=torch.float)))
+    else:
+        # Weights dont make sense if only one domain is being worked with
+        loss_aux_fn = partial(domain_classifier_loss, loss_fn=torch.nn.CrossEntropyLoss())
     opt_fn = partial(optim.Adam, betas=params.adam_betas)
     opt = make_opt(clf, opt_fn, lr=params.lr.init)
     # opt.param_groups[-1]['lr'] = 0.01
