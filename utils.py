@@ -1,7 +1,7 @@
 from typing import Callable, List
-from mytorch.utils.goodies import *
+from tqdm.autonotebook import tqdm
 from mytorch import lriters as mtlr
-from tqdm import tqdm_notebook as tqdm
+from mytorch.utils.goodies import *
 
 
 class DomainAgnosticSortishSampler:
@@ -279,18 +279,18 @@ def dann_loop(epochs: int,
 
                 # A. Regular stuff
                 y_pred, x_proc = train_fn(_x, _y_aux)
-                loss_main = loss_main_fn(y_pred, _y)
+                loss_main = loss_main_fn(y_pred=y_pred, y_true=_y, task_index=_y_aux)
 
                 # B. Aux stuff
                 y_pred_aux = train_aux_fn(x_proc)
-                loss_aux = loss_aux_fn(y_pred_aux, _y_aux)
+                loss_aux = loss_aux_fn(y_pred_aux, _y_aux, task_index=_y_aux)
 
                 # C. Add losses with scale.
                 loss = loss_main + (loss_aux_scale * loss_aux)
 
                 # Logging
-                per_epoch_tr_acc_main.append(eval_fn(y_pred=y_pred, y_true=_y).item())
-                per_epoch_tr_acc_aux.append(eval_aux_fn(y_pred=y_pred_aux, y_true=_y_aux).item())
+                per_epoch_tr_acc_main.append(eval_fn(y_pred=y_pred, y_true=_y, tasks=tasks, task_index=_y_aux))
+                per_epoch_tr_acc_aux.append(eval_aux_fn(y_pred=y_pred_aux, y_true=_y_aux, tasks=tasks, task_index=_y_aux))
                 per_epoch_loss_main.append(loss_main.item())
                 per_epoch_loss_aux.append(loss_aux.item())
 
@@ -324,32 +324,37 @@ def dann_loop(epochs: int,
 
                 y_pred = predict_fn(_x, _y_aux)[0]
 
-                per_epoch_vl_acc.append(eval_fn(y_pred=y_pred, y_true=_y).item())
+                per_epoch_vl_acc.append(eval_fn(y_pred=y_pred, y_true=_y, tasks=tasks, task_index=y_aux).item())
+
+        # Convert accuracy 2-D arrays to numpy array for easier lookup and shit
+        per_epoch_tr_acc_main, per_epoch_tr_acc_aux, per_epoch_vl_acc = \
+            np.array(per_epoch_tr_acc_main), np.array(per_epoch_tr_acc_aux), np.array(per_epoch_vl_acc)
+
 
         # Bookkeep
-        train_acc_main.append(np.mean(per_epoch_tr_acc_main))
+        train_acc_main.append(np.mean(per_epoch_tr_acc_main, axis=0))
         train_acc_aux.append(np.mean(per_epoch_tr_acc_aux))
         train_loss_main.append(np.mean(per_epoch_loss_main))
         train_loss_aux.append(np.mean(per_epoch_loss_main))
-        val_acc.append(np.mean(per_epoch_vl_acc))
+        val_acc.append(np.mean(per_epoch_vl_acc, axis=0))
 
-        print("Epoch: %(epo)03d | "
+        print(f"Epoch: %(epo)03d | "
               "Loss: %(loss).4f | "
               "Loss_aux: %(loss_aux).4f | "
-              "Tr_c: %(tracc)0.4f | "
-              "Vl_c: %(vlacc)0.5f | "
+              "Tr_c: %(tracc)s | "
+              "Vl_c: %(vlacc)s | "
               "Tr_aux: %(tracc_aux)0.4f | "
               " Time: %(time).3f m"
               % {'epo': e + epoch_count,
-                 'loss': float(np.mean(per_epoch_loss_main)),
-                 'loss_aux': float(np.mean(per_epoch_loss_aux)),
-                 'tracc': float(np.mean(per_epoch_tr_acc_main)),
-                 'tracc_aux': float(np.mean(per_epoch_tr_acc_aux)),
-                 'vlacc': float(np.mean(per_epoch_vl_acc)),
+                 'loss': float(train_loss_main[-1]),
+                 'loss_aux': float(train_loss_aux[-1]),
+                 'tracc': np.around(train_acc_main[-1], decimals=4),
+                 'tracc_aux': float(train_acc_aux[-1]),
+                 'vlacc': np.around(val_acc[-1], decimals=4),
                  'time': timer.interval / 60.0})
 
         # Save block (flag and condition)
-        if save and train_acc_main[-1] >= save_above_trn:
+        if save and (train_acc_main[-1] >= save_above_trn).any():
 
             # Update threshold
             save_above_trn = train_acc_main[-1]
@@ -382,7 +387,7 @@ def dann_loop(epochs: int,
 
             # Log the saved thing
             saved_info['epoch'] = e
-            saved_info['accuracy'] = val_acc[-1]
+            saved_info['accuracy'] = np.around(val_acc[-1], decimals=4)
             saved_info['directory'] = save_dir
 
         # Save block (flag and condition) (When more than 2 epochs have passed and we see lowest aux accuracy)

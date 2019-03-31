@@ -8,6 +8,7 @@
 # External Lib imports
 import os
 from functools import partial
+from sklearn.utils import class_weight
 from typing import List, Union, Callable
 
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
@@ -24,8 +25,8 @@ from mytorch.utils.goodies import *
 from mytorch import loops, lriters as mtlr
 
 # Local imports
-import main as p2
 import utils
+import main as p2
 from data import DataPuller
 from options import Phase3 as params, Phase2 as p2params
 
@@ -196,36 +197,41 @@ def custom_argmax(x: List[torch.Tensor], dim: int = 1) -> torch.Tensor:
     return torch.cat([pred.argmax(dim=dim) for pred in x])
 
 
+# noinspection PyUnresolvedReferences
+def _list_eval(y_pred: list, y_true: torch.Tensor, tasks: int = 1, task_index: torch.Tensor = None) -> List[np.float]:
+    """
+        Expects y_pred to be a list of tensors, but y_true to be a one tensor.
+        Also takes tasks as inputs and another tensor which specifies which example belongs to which task
+
+        Returns a list of floats (one for each task. Minimum: 1)
+
+        :param y_pred: list of n_batches items each of shape (1, nc_t) where nc_t can have multiple values
+        :param y_true: tensor of shape (b, 1)
+        :param tasks: (int, optional) a number of unique tasks for which we report eval
+        :param task_index: (torch.Tensor, optional) a vector indicating which tasks
+    """
+    acc = (custom_argmax(y_pred, dim=1) == y_true).float()
+    if not tasks > 1 or task_index is None:
+        return torch.mean(acc).item()
+
+    return [torch.mean(torch.masked_select(acc, task_index == task)).item() for task in range(tasks)]
+
 # # noinspection PyUnresolvedReferences
-# def _list_eval(y_pred: list, y_true: torch.Tensor, tasks: int = 1, task_vector: torch.Tensor = None) -> Union[List[np.float], np.float]:
+# def _list_eval(y_pred, y_true):
 #     """
-#         Expects y_pred to be a list of tensors, but y_true to be a one tensor.
-#         Also takes tasks as inputs and another tensor which specifies which example belongs to which task
-#
-#         :param y_pred: list of n_batches items each of shape (1, nc_t) where nc_t can have multiple values
+#         Expects a batch of input
+#         :param y_pred: tensor of shape (b, nc)
 #         :param y_true: tensor of shape (b, 1)
 #     """
-#     acc = torch.mean((custom_argmax(y_pred, dim=1) == y_true).float())
-#     if not tasks > 1 or task_vector is None:
-#         return acc
-#
-#     accs = []
-#     for task in tasks:
-
-# noinspection PyUnresolvedReferences
-def _list_eval(y_pred, y_true):
-    """
-        Expects a batch of input
-        :param y_pred: tensor of shape (b, nc)
-        :param y_true: tensor of shape (b, 1)
-    """
-    return torch.mean((custom_argmax(y_pred, dim=1) == y_true).float())
+#     return torch.mean((custom_argmax(y_pred, dim=1) == y_true).float())
 
 
 # noinspection PyUnresolvedReferences
-def _eval(y_pred, y_true):
+def _eval(y_pred, y_true, **args):
     """
         Expects a batch of input
+
+        Ignores a bunch of extra args.
 
         :param y_pred: tensor of shape (b, nc)
         :param y_true: tensor of shape (b, 1)
@@ -235,21 +241,42 @@ def _eval(y_pred, y_true):
 
 
 # noinspection PyUnresolvedReferences
-def mulittask_classification_loss(y_pred: list, y_true: torch.Tensor, loss_fn: Union[torch.nn.Module, Callable]) -> torch.Tensor:
+def mulittask_classification_loss(y_pred: list, y_true: torch.Tensor,
+                                  loss_fn: List[Union[torch.nn.Module, Callable]],
+                                  task_index: torch.Tensor = None) -> torch.Tensor:
     """
         Accepts different sized y_preds where each element can have [1, _] shapes.
-        Provide a loss function using our regular -partial- thing.
+        Provide one or multiple loss functions depending upon the num of tasks, using our regular -partial- thing.
 
         Eg. lfn = partial(mulittask_classification_loss, loss_fn:torch.nn.CrossEntropyLoss())
 
     :param y_pred: (list) of tensors where each tensor is of shape (1, _) of length bs
     :param y_true: (torch.Tensor) of shape (bs,)
-    :param loss_fn: (torch.nn.Module or a function) which calculates loss given a y_true and y_pred
+    :param loss_fn: (torch.nn.Module or a function; or a list of those) which calculate the loss given a y_true and y_pred.
+    :param task_index: (torch.Tensor, Optional) of shape (bs,) which dictates which loss to use.
+                       Must be provided if there are multiple loss_fns provided
     :return: the loss value (torch.Tensor)
     """
-    losses = [loss_fn(_y_pred.view(1, -1), y_true[i].unsqueeze(0)).view(-1)
-              for i, _y_pred in enumerate(y_pred)]
-    return torch.mean(torch.cat(losses))
+
+    # Case 1, only one task -> len(loss_fn) == 1. Ignore task index, in this case
+    if len(loss_fn) == 1:
+        losses = [loss_fn[0](_y_pred.view(1, -1), y_true[i].unsqueeze(0)).view(-1)
+                  for i, _y_pred in enumerate(y_pred)]
+
+    else:
+        # Case 2: multiple loss functions. In that case, choose the loss fn based on task index
+        assert len(y_pred) == y_true.shape[0] == task_index.shape[0], f"Mismatch between y_pred of {len(y_pred)} items, " \
+            f"y_true of len {y_true.shape[0]}, and task_index of len {task_index.shape[0]}"
+
+        losses = [loss_fn[task_index[i].item()](_y_pred.view(1, -1), y_true[i].unsqueeze(0)).view(-1)
+                  for i, _y_pred in enumerate(y_pred)]
+
+    return torch.sum(torch.cat(losses))
+
+
+def domain_classifier_loss(y_pred: list, y_true: torch.Tensor, loss_fn: List[Union[torch.nn.Module, Callable]], **args):
+    """ Thin wrapper over loss fn to accept misguided args."""
+    return loss_fn(y_pred, y_true)
 
 
 if __name__ == "__main__":
@@ -295,28 +322,39 @@ if __name__ == "__main__":
 
     data_puller = DataPuller(debug=False, max_vocab=params.max_vocab_task, min_freq=params.min_vocab_freq, trim_trn=1000, trim_val=-1)
 
-    trn_texts_a, trn_labels_a, val_texts_a, val_labels_a, _ = data_puller.get(DATASETS[0], supervised=True,
+    trn_texts, trn_labels, val_texts, val_labels, task_specific_weights = [], [], [], [], []
+    for dataset in DATASETS:
+
+        trn_texts_, trn_labels_, val_texts_, val_labels_, itos = data_puller.get(dataset, supervised=True,
                                                                               trim=params.quick, cached=not params.quick)
-    # Lose label 2 from imdb
-    if DATASETS[0] == 'imdb':
-        trn_texts_a = trn_texts_a[trn_labels_a < 2]
-        trn_labels_a = trn_labels_a[trn_labels_a < 2]
 
-    trn_texts_b, trn_labels_b, val_texts_b, val_labels_b, itos = data_puller.get(DATASETS[1], supervised=True,
-                                                                                 trim=params.quick, merge_vocab=params.max_vocab_wiki)
+        # Lose label 2 from imdb
+        if dataset == 'imdb':
+            trn_texts_ = trn_texts_[trn_labels_ < 2]
+            trn_labels_ = trn_labels_[trn_labels_ < 2]
 
-    if DATASETS[1] == 'imdb':
-        trn_texts_b = trn_texts_b[trn_labels_b < 2]
-        trn_labels_b = trn_labels_b[trn_labels_b < 2]
+        # Compute weights for cross entropy loss
+        class_weights_ = class_weight.compute_class_weight('balanced', classes=range(KNOWN_DATASETS[dataset]), y=trn_labels_)
 
-    '''
-        Transform words from data_puller.itos vocabulary to that of the pretrained model (__main__.itos2)
-    '''
+        # Store all things in a nice format
+        trn_texts.append(trn_texts_)
+        trn_labels.append(trn_labels_)
+        val_texts.append(val_texts_)
+        val_labels.append(val_labels_)
+        task_specific_weights.append(class_weights_)
+
+    # At this point, the five lists contain each some aspect of our datasets. itos (the list overwritten in the loop) contains the vocab.
+
+    # Transform words from data_puller.itos vocabulary to that of the pretrained model (__main__.itos2)
     _itos2 = dict(enumerate(itos2))
-    trn_texts_a = [[stoi2[_itos2.get(i, '_unk_')] for i in sent] for sent in trn_texts_a]
-    val_texts_a = [[stoi2[_itos2.get(i, '_unk_')] for i in sent] for sent in val_texts_a]
-    trn_texts_b = [[stoi2[_itos2.get(i, '_unk_')] for i in sent] for sent in trn_texts_b]
-    val_texts_b = [[stoi2[_itos2.get(i, '_unk_')] for i in sent] for sent in val_texts_b]
+    for i, trn_texts_, val_texts_ in enumerate(zip(trn_texts, val_texts)):
+        trn_texts[i] = [[stoi2[_itos2.get(i, '_unk_')] for i in sent] for sent in trn_texts_]
+        val_texts[i] = [[stoi2[_itos2.get(i, '_unk_')] for i in sent] for sent in val_texts_]
+
+    # Compute dataset specific weights. Formula: n_samples / (n_classes * np.bincount(<flatlist_indexing_all_samples_for_all_datasets>))
+    bincount = np.array([len(trn_labels_) for trn_labels_ in trn_labels])
+    dataset_specific_weights = np.sum(bincount) / (len(bincount) * bincount)
+
 
     '''
         Make model
@@ -330,17 +368,17 @@ if __name__ == "__main__":
         Setup things for training (data, loss, opt, lr schedule etc
     '''
     bs = params.bs
-    loss_main_fn = partial(mulittask_classification_loss, loss_fn=torch.nn.CrossEntropyLoss())
-    loss_aux_fn = torch.nn.CrossEntropyLoss()
+    loss_fns = [torch.nn.CrossEntropyLoss(weight=w) for w in task_specific_weights]
+    loss_main_fn = partial(mulittask_classification_loss, loss_fn=loss_fns)
+    loss_aux_fn = partial(domain_classifier_loss, loss_fn=torch.nn.CrossEntropyLoss(dataset_specific_weights))
     opt_fn = partial(optim.Adam, betas=params.adam_betas)
     opt = make_opt(clf, opt_fn, lr=params.lr.init)
     # opt.param_groups[-1]['lr'] = 0.01
 
     # Make data
-    # @TODO: make this code compatible with one dataset (no dann)
     data_fn = partial(utils.DomainAgnosticSortishSampler, _batchsize=bs, _padidx=1)
-    data_train = [{'x': trn_texts_a, 'y': trn_labels_a}, {'x': trn_texts_b, 'y': trn_labels_b}]
-    data_valid = [{'x': val_texts_a, 'y': val_labels_a}, {'x': val_texts_b, 'y': val_labels_b}]
+    data_train = [{'x': trn_texts_, 'y': trn_labels_} for trn_texts_, trn_labels_ in zip(trn_texts, trn_labels)]
+    data_valid = [{'x': val_texts_, 'y': val_labels_} for val_texts_, val_labels_ in zip(val_texts, val_labels)]
     data = {'train': data_train, 'valid': data_valid}
 
     # Make lr scheduler
@@ -361,7 +399,7 @@ if __name__ == "__main__":
             'train_fn': clf, 'predict_fn': clf.predict, 'train_aux_fn': clf.domain,
             'epoch_end_hook': partial(epoch_end_hook, opt=opt, lr_schedule=lr_schedule), 'weight_decay': params.weight_decay,
             'clip_grads_at': params.clip_grads_at, 'lr_schedule': lr_schedule,
-            'loss_aux_scale': params.loss_scale if len(DATASETS) > 1 else 0, 'tasks': 2,
+            'loss_aux_scale': params.loss_scale if len(DATASETS) > 1 else 0, 'tasks': len(DATASETS),
             'data_fn': data_fn, 'eval_fn': _list_eval, 'eval_aux_fn': _eval,
             'save': not SAFE_MODE, 'save_params': params, 'save_dir': UNSUP_MODEL_DIR, 'save_fnames': save_fnames}
 
@@ -425,6 +463,7 @@ if __name__ == "__main__":
     # opt.param_groups[-4]['lr'] = 0.001
     # opt.param_groups[-5]['lr'] = 0.001
     lr_args['cycles'] = 15
+    lr_args['iterations'] *= 15
     args['epochs'] = 15
     lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
     args['lr_schedule'] = lr_schedule
