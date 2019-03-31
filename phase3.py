@@ -320,7 +320,8 @@ if __name__ == "__main__":
     itos2 = pickle.load(itos_path.open('rb'))
     stoi2 = {v: k for k, v in enumerate(itos2)}
 
-    data_puller = DataPuller(debug=False, max_vocab=params.max_vocab_task, min_freq=params.min_vocab_freq, trim_trn=1000, trim_val=-1)
+    data_puller = DataPuller(debug=False, max_vocab=params.max_vocab_task, min_freq=params.min_vocab_freq,
+                             trim_trn=1000, trim_val=1000)
 
     trn_texts, trn_labels, val_texts, val_labels, task_specific_weights = [], [], [], [], []
     for dataset in DATASETS:
