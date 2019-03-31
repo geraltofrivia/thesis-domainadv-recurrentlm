@@ -289,6 +289,7 @@ def dann_loop(epochs: int,
                 loss = loss_main + (loss_aux_scale * loss_aux)
 
                 # Logging
+                # NOTE: here value nan signals that no element of that task existed here. Need to take care of these nans later.
                 per_epoch_tr_acc_main.append(eval_fn(y_pred=y_pred, y_true=_y, tasks=tasks, task_index=_y_aux))
                 per_epoch_tr_acc_aux.append(eval_aux_fn(y_pred=y_pred_aux, y_true=_y_aux, tasks=tasks, task_index=_y_aux))
                 per_epoch_loss_main.append(loss_main.item())
@@ -324,19 +325,19 @@ def dann_loop(epochs: int,
 
                 y_pred = predict_fn(_x, _y_aux)[0]
 
-                per_epoch_vl_acc.append(eval_fn(y_pred=y_pred, y_true=_y, tasks=tasks, task_index=y_aux).item())
+                # NOTE: here value nan signals that no element of that task existed here. Need to take care of these nans later.
+                per_epoch_vl_acc.append(eval_fn(y_pred=y_pred, y_true=_y, tasks=tasks, task_index=_y_aux))
 
         # Convert accuracy 2-D arrays to numpy array for easier lookup and shit
         per_epoch_tr_acc_main, per_epoch_tr_acc_aux, per_epoch_vl_acc = \
             np.array(per_epoch_tr_acc_main), np.array(per_epoch_tr_acc_aux), np.array(per_epoch_vl_acc)
 
-
-        # Bookkeep
-        train_acc_main.append(np.mean(per_epoch_tr_acc_main, axis=0))
-        train_acc_aux.append(np.mean(per_epoch_tr_acc_aux))
+        # Bookkeep @TODO: instead of averaging the loss, keep a list here, and average later!
+        train_acc_main.append(np.nanmean(per_epoch_tr_acc_main, axis=0))
+        train_acc_aux.append(np.nanmean(per_epoch_tr_acc_aux))
         train_loss_main.append(np.mean(per_epoch_loss_main))
-        train_loss_aux.append(np.mean(per_epoch_loss_main))
-        val_acc.append(np.mean(per_epoch_vl_acc, axis=0))
+        train_loss_aux.append(np.mean(per_epoch_loss_aux))
+        val_acc.append(np.nanmean(per_epoch_vl_acc, axis=0))
 
         print(f"Epoch: %(epo)03d | "
               "Loss: %(loss).4f | "

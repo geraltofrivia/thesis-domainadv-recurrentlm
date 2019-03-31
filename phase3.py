@@ -243,7 +243,7 @@ def _eval(y_pred, y_true, **args):
 # noinspection PyUnresolvedReferences
 def mulittask_classification_loss(y_pred: list, y_true: torch.Tensor,
                                   loss_fn: List[Union[torch.nn.Module, Callable]],
-                                  task_index: torch.Tensor = None) -> torch.Tensor:
+                                  task_index: torch.Tensor = None, **args) -> torch.Tensor:
     """
         Accepts different sized y_preds where each element can have [1, _] shapes.
         Provide one or multiple loss functions depending upon the num of tasks, using our regular -partial- thing.
@@ -347,7 +347,7 @@ if __name__ == "__main__":
 
     # Transform words from data_puller.itos vocabulary to that of the pretrained model (__main__.itos2)
     _itos2 = dict(enumerate(itos2))
-    for i, trn_texts_, val_texts_ in enumerate(zip(trn_texts, val_texts)):
+    for i, (trn_texts_, val_texts_) in enumerate(zip(trn_texts, val_texts)):
         trn_texts[i] = [[stoi2[_itos2.get(i, '_unk_')] for i in sent] for sent in trn_texts_]
         val_texts[i] = [[stoi2[_itos2.get(i, '_unk_')] for i in sent] for sent in val_texts_]
 
@@ -368,9 +368,11 @@ if __name__ == "__main__":
         Setup things for training (data, loss, opt, lr schedule etc
     '''
     bs = params.bs
-    loss_fns = [torch.nn.CrossEntropyLoss(weight=w) for w in task_specific_weights]
+    loss_fns = [torch.nn.CrossEntropyLoss(weight=torch.tensor(w, device=device, dtype=torch.float))
+                for w in task_specific_weights]
     loss_main_fn = partial(mulittask_classification_loss, loss_fn=loss_fns)
-    loss_aux_fn = partial(domain_classifier_loss, loss_fn=torch.nn.CrossEntropyLoss(dataset_specific_weights))
+    loss_aux_fn = partial(domain_classifier_loss,
+                          loss_fn=torch.nn.CrossEntropyLoss(torch.tensor(dataset_specific_weights, device=device, dtype=torch.float)))
     opt_fn = partial(optim.Adam, betas=params.adam_betas)
     opt = make_opt(clf, opt_fn, lr=params.lr.init)
     # opt.param_groups[-1]['lr'] = 0.01
@@ -404,11 +406,15 @@ if __name__ == "__main__":
             'save': not SAFE_MODE, 'save_params': params, 'save_dir': UNSUP_MODEL_DIR, 'save_fnames': save_fnames}
 
     '''
-        Training schedule:
+        Training schedule: 
+        NOTE: Removed all freezing
         
         1. Unfreeze one layer. Train for 1 epoch
         2 - 5. Unfreeze one layer, train for 1 epoch
         3. Train for 15 epochs (after all layers are unfrozen). Use 15 cycles for cosine annealing.
+        
+        @TODO: save_above_trn, save_below_aux needs to be fixed to handle multiple values!!
+        
     '''
     # opt.param_groups[-1]['lr'] = 0.01
     traces = utils.dann_loop(**args)
