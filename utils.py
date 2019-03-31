@@ -1,7 +1,11 @@
+import inflect
 from typing import Callable, List
 from tqdm.autonotebook import tqdm
 from mytorch import lriters as mtlr
 from mytorch.utils.goodies import *
+
+
+ordinalator = inflect.engine()
 
 
 class DomainAgnosticSortishSampler:
@@ -25,16 +29,14 @@ class DomainAgnosticSortishSampler:
     def __init__(self, _data: list, _batchsize: int, _seqlen: int = None, _padidx=0):
         """ @TODO: snip everything with seqlen """
 
-        _data_a, _data_b = _data
-
-        try:
-            assert len(_data_a['x']) == len(_data_a['y'])
-            assert len(_data_b['x']) == len(_data_b['y'])
-        except AssertionError:
-            raise MismatchedDataError
+        for i, dataset in enumerate(_data):
+            try:
+                assert len(dataset['x']) == len(dataset['y'])
+            except AssertionError:
+                raise MismatchedDataError(f"Data size mismatch in {ordinalator.ordinal(i)} data point.")
 
         # Combine the data and maintain another domain index
-        inputs, labels, domain = self._combine_domains_(src_a=_data_a, src_b=_data_b)
+        inputs, labels, domain = self._combine_domains_(srcs=_data)
 
         self.bs = _batchsize
         self.padidx = _padidx
@@ -47,11 +49,11 @@ class DomainAgnosticSortishSampler:
         self.ptr = 0
 
     @staticmethod
-    def _combine_domains_(src_a: dict, src_b: dict) -> (List[list], List[int], List[int]):
+    def _combine_domains_(srcs: List[dict]) -> (List[list], List[int], List[int]):
         """ Concatenate two datasets, and maintain a domain index"""
-        inputs = list(np.concatenate([src_a['x'], src_b['x']]))
-        labels = list(np.concatenate([src_a['y'], src_b['y']]))
-        domain = list(np.concatenate([np.zeros(len(src_a['x'])), np.ones(len(src_b['x']))]))
+        inputs = list(np.concatenate([src_['x'] for src_ in srcs]))
+        labels = list(np.concatenate([src_['y'] for src_ in srcs]))
+        domain = list(np.concatenate([np.zeros(len(src_['x']))+i for i, src_ in enumerate(srcs)]))
 
         return inputs, labels, domain
 
@@ -117,12 +119,15 @@ class DomainAgnosticSortishSampler:
     def __iter__(self):
         return self
 
-    def __next__(self)->(np.ndarray, np.ndarray, np.ndarray):
+    def __next__(self) -> (np.ndarray, np.ndarray, np.ndarray):
         """ Iter over self.x, self.y & self.d """
+
         if self.ptr >= len(self.x):
             raise StopIteration
+
         _x, _y, _d = self.x[self.ptr], self.y[self.ptr], self.d[self.ptr]
         self.ptr += 1
+
         return _x, _y, _d
 
     def __len__(self):
@@ -425,7 +430,7 @@ def dann_loop(epochs: int,
 
                 # Log the saved thing
                 saved_info['epoch'] = e
-                saved_info['accuracy'] = val_acc[-1]
+                saved_info['accuracy'] = np.around(val_acc[-1], decimals=4)
                 saved_info['directory'] = save_dir
 
     if notify:
