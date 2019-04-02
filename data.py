@@ -80,7 +80,7 @@ class DataPuller:
         self.processed = []
         self.itos, self.stoi = [], {}
 
-    def get(self, src, supervised: bool = True, trim: bool = False, merge_vocab: int = 0, cached: bool = True) \
+    def get(self, src: str, supervised: bool = True, trim: bool = False, merge_vocab: int = 0, cached: bool = True) \
             -> (List[np.ndarray], Optional[List[np.ndarray]], List[np.ndarray], Optional[List[np.ndarray]], List[str]):
         """
             Use this function to pull some dataset from disk
@@ -108,70 +108,8 @@ class DataPuller:
         src = src.lower()
         assert src in KNOWN_SOURCES, f'Incorrect dataset name ({src}) passed.'
 
-        # Code to pull processed dataset from disk (first call of get)
-        if cached and len(self.processed) == 0:
-            try:
-                cache_path = Path(CACHED_PATH_TEMPLATE % {'src': src})
-                options = pickle.load(open(cache_path/'options.pkl', 'rb'))
-
-                # Check if data was cached in the format that we want right now
-                if options['trim'] != trim:
-                    warnings.warn(f"Data ({src}) is cached but with a different setting than as requested right now.")
-                    raise FileNotFoundError
-
-                # Pulling data from disk
-                trn_texts = np.load(cache_path/'trn_texts.npy')
-                trn_labels = np.load(cache_path/'trn_labels.npy')
-                val_texts = np.load(cache_path/'val_texts.npy')
-                val_labels = np.load(cache_path/'val_labels.npy')
-                self.itos = pickle.load(open(cache_path/'itos.pkl', 'rb'))
-                self.stoi = {v: k for k, v in enumerate(self.itos)}
-
-                self.processed.append(src)
-
-                if supervised:
-                    return trn_texts, trn_labels, val_texts, val_labels, self.itos.copy()
-                else:
-                    return trn_texts, val_texts, self.itos.copy()
-
-            except FileNotFoundError:
-                if self.debug:
-                    traceback.print_exc()
-                warnings.warn(f"Couldn't find requested processed dataset ({src}) from cache, making it from scratch.")
-
-        # Code to pull processed dataset from disk **AFTER ONE** dataset has already been asked for
-        if cached and len(self.processed) == 1:
-            try:
-                cache_path = Path(CACHED_PATH_TEMPLATE % {'src': self.processed[0]})
-                options = pickle.load(open(cache_path/f'options_{src}.pkl', 'rb'))
-
-                # Check if data was cached in the format that we want right now
-                if options['trim'] != trim or options['merge_vocab'] != merge_vocab:
-                    warnings.warn(f"Data ({src}) is cached but with a different setting than as requested right now.")
-                    raise FileNotFoundError
-
-                # Pulling data from disk
-                trn_texts = np.load(cache_path/f'trn_texts_{src}.npy')
-                trn_labels = np.load(cache_path/f'trn_labels_{src}.npy')
-                val_texts = np.load(cache_path/f'val_texts_{src}.npy')
-                val_labels = np.load(cache_path/f'val_labels_{src}.npy')
-                self.itos = pickle.load(open(cache_path/f'itos_{src}.pkl', 'rb'))
-                self.stoi = {v: k for k, v in enumerate(self.itos)}
-
-                self.processed.append(src)
-
-                if supervised:
-                    return trn_texts, trn_labels, val_texts, val_labels, self.itos.copy()
-                else:
-                    return trn_texts, val_texts, self.itos.copy()
-
-            except FileNotFoundError:
-                if self.debug:
-                    traceback.print_exc()
-                warnings.warn(f"Couldn't find requested processed dataset ({src}) from cache, making it from scratch.")
-
-        # Cached data not requested or did not exist in proper condition. Making it from scratch
-        trn_texts, trn_labels, val_texts, val_labels = getattr(self, '_'+src+'_')()
+        # Get data from scratch or cache intelligently
+        trn_texts, trn_labels, val_texts, val_labels, from_cache = self._get_(src, merge_vocab=merge_vocab, cached=cached)
 
         # Shuffle and Trim (if needed)
         trn_idx = np.random.permutation(len(trn_texts))
@@ -184,44 +122,45 @@ class DataPuller:
         trn_texts, trn_labels = [trn_texts[i] for i in trn_idx], [trn_labels[i] for i in trn_idx]
         val_texts, val_labels = [val_texts[i] for i in val_idx], [val_labels[i] for i in val_idx]
 
-        """
-            Vocabulary preparation.
-            Two parts - making vocab, and converting the dataset.
-            Logic:        
-                if this is the first dataset being processed (self.processed is empty),
-                    simply make vocab (itos,stoi)
-                    and convert this dataset
-                    
-                if there are other datasets already made, then pass the `merge_vocab` arg to vocab making fn,
-                    and correspondingly to the conversion function.
-        """
-        self._prepare_vocab_(trn_texts, merge_vocab if len(self.processed) > 0 else -1)
-        trn_texts, val_texts = self._vocabularize_([trn_texts, val_texts])
+        if not from_cache:
 
-        # Cache things if enabled and this is the first dataset we're processing
-        if cached and len(self.processed) == 0:
+            # Need to make vocab, vocabularize, and cache.
 
-            cache_path = Path(CACHED_PATH_TEMPLATE % {'src': src})
-            np.save(cache_path/'trn_texts.npy', trn_texts)
-            np.save(cache_path/'trn_labels.npy', trn_labels)
-            np.save(cache_path/'val_texts.npy', val_texts)
-            np.save(cache_path/'val_labels.npy', val_labels)
-            pickle.dump(self.itos, open(cache_path/'itos.pkl', 'wb+'))
-            pickle.dump({'trim': trim}, open(cache_path/'options.pkl', 'wb+'))
+            """
+                Vocabulary preparation.
+                Two parts - making vocab, and converting the dataset.
+                Logic:        
+                    if this is the first dataset being processed (self.processed is empty),
+                        simply make vocab (itos,stoi)
+                        and convert this dataset
+                        
+                    if there are other datasets already made, then pass the `merge_vocab` arg to vocab making fn,
+                        and correspondingly to the conversion function.
+            """
+            self._prepare_vocab_(trn_texts, merge_vocab if len(self.processed) > 0 else -1)
+            trn_texts, val_texts = self._vocabularize_([trn_texts, val_texts])
 
-        # Cache things if enabled and this is the second dataset we're processing
-        if cached and len(self.processed) == 1:
+            # Cache things if enabled and this is the first dataset we're processing
+            if cached and len(self.processed) == 0:
 
-            cache_path = Path(CACHED_PATH_TEMPLATE % {'src': self.processed[0]})
-            np.save(cache_path / f'trn_texts_{src}.npy', trn_texts)
-            np.save(cache_path / f'trn_labels_{src}.npy', trn_labels)
-            np.save(cache_path / f'val_texts_{src}.npy', val_texts)
-            np.save(cache_path / f'val_labels_{src}.npy', val_labels)
-            pickle.dump(self.itos, open(cache_path / f'itos_{src}.pkl', 'wb+'))
-            pickle.dump({'trim': trim, 'merge_vocab': merge_vocab}, open(cache_path / f'options_{src}.pkl', 'wb+'))
+                cache_path = Path(CACHED_PATH_TEMPLATE % {'src': src})
+                np.save(cache_path/'trn_texts.npy', trn_texts)
+                np.save(cache_path/'trn_labels.npy', trn_labels)
+                np.save(cache_path/'val_texts.npy', val_texts)
+                np.save(cache_path/'val_labels.npy', val_labels)
+                pickle.dump(self.itos, open(cache_path/'itos.pkl', 'wb+'))
+                pickle.dump({'trim': trim}, open(cache_path/'options.pkl', 'wb+'))
 
-        # Finally, return elements depending on `supervised` label | And log what we just accomplished
-        self.processed.append(src)
+            # Cache things if enabled and this is the second dataset we're processing
+            if cached and len(self.processed) == 1:
+
+                cache_path = Path(CACHED_PATH_TEMPLATE % {'src': self.processed[0]})
+                np.save(cache_path / f'trn_texts_{src}.npy', trn_texts)
+                np.save(cache_path / f'trn_labels_{src}.npy', trn_labels)
+                np.save(cache_path / f'val_texts_{src}.npy', val_texts)
+                np.save(cache_path / f'val_labels_{src}.npy', val_labels)
+                pickle.dump(self.itos, open(cache_path / f'itos_{src}.pkl', 'wb+'))
+                pickle.dump({'trim': trim, 'merge_vocab': merge_vocab}, open(cache_path / f'options_{src}.pkl', 'wb+'))
 
         # if lists, conv to arrays
         trn_texts = np.array(trn_texts) if type(trn_texts) is list else trn_texts
@@ -229,19 +168,87 @@ class DataPuller:
         val_texts = np.array(val_texts) if type(val_texts) is list else val_texts
         val_labels = np.array(val_labels) if type(val_labels) is list else val_labels
 
+        # Finally, return elements depending on `supervised` label | And log what we just accomplished
+        self.processed.append(src)
+
         if supervised:
             return trn_texts, trn_labels, val_texts, val_labels, self.itos.copy()
         else:
             return trn_texts, val_texts, self.itos.copy()
 
-    def _imdb_(self)->(List[str], List[int], List[str], List[int]):
+    def _get_(self, src: str, merge_vocab: int = 0, cached: bool = True) \
+            -> (List[np.ndarray], List[np.ndarray], List[np.ndarray], List[np.ndarray], bool):
+        """ Actually pulls data from cache or disk, vocabularizes etc. """
+
+        # Code to pull processed dataset from disk (first call of get)
+        if cached and len(self.processed) == 0:
+            try:
+                cache_path = Path(CACHED_PATH_TEMPLATE % {'src': src})
+                # options = pickle.load(open(cache_path / 'options.pkl', 'rb'))
+
+                # # Check if data was cached in the format that we want right now
+                # if options['trim'] != trim:
+                #     warnings.warn(f"Data ({src}) is cached but with a different setting than as requested right now.")
+                #     raise FileNotFoundError
+
+                # Pulling data from disk
+                trn_texts = np.load(cache_path / 'trn_texts.npy')
+                trn_labels = np.load(cache_path / 'trn_labels.npy')
+                val_texts = np.load(cache_path / 'val_texts.npy')
+                val_labels = np.load(cache_path / 'val_labels.npy')
+                self.itos = pickle.load(open(cache_path / 'itos.pkl', 'rb'))
+                self.stoi = {v: k for k, v in enumerate(self.itos)}
+
+                self.processed.append(src)
+
+                return trn_texts, trn_labels, val_texts, val_labels, True
+
+            except FileNotFoundError:
+                if self.debug:
+                    traceback.print_exc()
+                warnings.warn(f"Couldn't find requested processed dataset ({src}) from cache, making it from scratch.")
+
+        # Code to pull processed dataset from disk **AFTER ONE** dataset has already been asked for
+        if cached and len(self.processed) == 1:
+            try:
+                cache_path = Path(CACHED_PATH_TEMPLATE % {'src': self.processed[0]})
+                options = pickle.load(open(cache_path / f'options_{src}.pkl', 'rb'))
+
+                # Check if data was cached in the format that we want right now
+                if options['merge_vocab'] != merge_vocab:
+                    warnings.warn(f"Data ({src}) is cached but with a different setting than as requested right now.")
+                    raise FileNotFoundError
+
+                # Pulling data from disk
+                trn_texts = np.load(cache_path / f'trn_texts_{src}.npy')
+                trn_labels = np.load(cache_path / f'trn_labels_{src}.npy')
+                val_texts = np.load(cache_path / f'val_texts_{src}.npy')
+                val_labels = np.load(cache_path / f'val_labels_{src}.npy')
+                self.itos = pickle.load(open(cache_path / f'itos_{src}.pkl', 'rb'))
+                self.stoi = {v: k for k, v in enumerate(self.itos)}
+
+                self.processed.append(src)
+
+                return trn_texts, trn_labels, val_texts, val_labels, True
+
+            except FileNotFoundError:
+                if self.debug:
+                    traceback.print_exc()
+                warnings.warn(f"Couldn't find requested processed dataset ({src}) from cache, making it from scratch.")
+
+        # Cached data not requested or did not exist in proper condition. Making it from scratch
+        trn_texts, trn_labels, val_texts, val_labels = getattr(self, '_' + src + '_')()
+
+        return trn_texts, trn_labels, val_texts, val_labels, False
+
+    def _imdb_(self) -> (List[str], List[int], List[str], List[int]):
         """ Pulls imdb data from disk, tokenize and return."""
         trn_texts, trn_lbl = self.__imdb_pull_from_disk__(IMDB_DATA_PATH / 'train')
         val_texts, val_lbl = self.__imdb_pull_from_disk__(IMDB_DATA_PATH / 'test')
 
         return self.__common_preprocessing_(trn_texts, trn_lbl, val_texts, val_lbl)
 
-    def _trec_(self)->(List[str], List[int], List[str], List[int]):
+    def _trec_(self) -> (List[str], List[int], List[str], List[int]):
         """ Using the 6 class version of the dataset """
 
         trn_texts, trn_lbl = self.__trec_pull_from_disk__(TREC_DATA_PATH / 'train')
@@ -254,7 +261,7 @@ class DataPuller:
 
         return self.__common_preprocessing_(trn_texts, trn_lbl, val_texts, val_lbl)
 
-    def _yelp_(self)->(List[str], List[int], List[str], List[int]):
+    def _yelp_(self) -> (List[str], List[int], List[str], List[int]):
         """ Converts 5 star rating into a binary setting (see https://arxiv.org/abs/1801.06146) """
         data = pd.read_json(YELP_DATA_PATH / 'review.json', lines=True)
         texts = data.text.values
@@ -270,7 +277,7 @@ class DataPuller:
 
         return self.__common_preprocessing_(trn_texts, trn_lbl, val_texts, val_lbl, _distribute=True)
 
-    def _wikitext_(self)->(List[str], List[int], List[str], List[int]):
+    def _wikitext_(self) -> (List[str], List[int], List[str], List[int]):
         """ Adds validation set to train """
         trn_texts, val_texts, tst_texts = self.__wiki_pull_from_disk__(WIKI_DATA_PATH)
 
@@ -305,7 +312,7 @@ class DataPuller:
 
         return trn_tok, trn_lbl, val_tok, val_lbl
 
-    def _prepare_vocab_(self, source: list, merge_vocab: int = -1)->None:
+    def _prepare_vocab_(self, source: list, merge_vocab: int = -1) -> None:
         """
             Function which takes data (train only), and makes a vocabulary
         :param source: list of tokenized text from which a vocabulary should be made.
@@ -360,7 +367,7 @@ class DataPuller:
         return re1.sub(' ', html.unescape(x))
 
     @staticmethod
-    def __tokenize__(texts: list, _distribute: bool = True)->(List[list]):
+    def __tokenize__(texts: list, _distribute: bool = True) -> (List[list]):
         """ Uses fastai.text's tokenizer. Expects a simple list."""
         if _distribute:
             return text.Tokenizer().proc_all_mp(core.partition_by_cores(texts))
@@ -374,7 +381,7 @@ class DataPuller:
         return texts, list(labels)
 
     @staticmethod
-    def __imdb_pull_from_disk__(path: Path):
+    def __imdb_pull_from_disk__(path: Path) -> (np.ndarray, np.ndarray):
         texts, labels = [], []
         for idx, label in enumerate(['neg', 'pos', 'unsup']):
             for fname in (path / label).glob('*.*'):
@@ -383,7 +390,7 @@ class DataPuller:
         return np.array(texts), np.array(labels)
 
     @staticmethod
-    def __trec_pull_from_disk__(path: Path):
+    def __trec_pull_from_disk__(path: Path) -> (np.ndarray, np.ndarray):
         # noinspection PyTypeChecker
         raw = open(path, 'r', encoding='ISO-8859-1')
         raw_lbl, raw_txt = [] ,[]
@@ -392,7 +399,7 @@ class DataPuller:
             raw_txt.append(' '.join(line.split()[1:]))
         return np.array(raw_txt), np.array(raw_lbl)
 
-    def __wiki_pull_from_disk__(self, path: Path)->list:
+    def __wiki_pull_from_disk__(self, path: Path) -> list:
         texts = []
         for idx, label in enumerate(WIKI_CLASSES):
             # noinspection PyTypeChecker
@@ -401,7 +408,7 @@ class DataPuller:
         return texts
 
     @staticmethod
-    def __is_valid_sent__(x: str)->bool:
+    def __is_valid_sent__(x: str) -> bool:
         x = x.strip()
         if len(x) == 0:
             return False
