@@ -125,7 +125,7 @@ class CustomEncoder(lm_rnn.RNN_Encoder):
 
     def forward(self, input, domain=None):
         """ Overwrote fn to keep the interface same b/w phase 2 & phase 3 models (same training loop)"""
-        super().forward(input)
+        return super().forward(input)
 
     @property
     def layers(self):
@@ -145,7 +145,7 @@ class CustomDecoder(text.LinearDecoder):
         output = self.dropout(outputs[-1])
         decoded = self.decoder(output.view(output.size(0) * output.size(1), output.size(2)))
         result = decoded.view(-1, decoded.size(1))
-        return result, raw_outputs, outputs
+        return result, (raw_outputs, outputs)
 
 
 # noinspection PyShadowingNames
@@ -165,7 +165,7 @@ class CustomLinear(lm_rnn.PoolingLinearClassifier):
             else:
                 x = torch.sigmoid(l_x)
         # noinspection PyUnboundLocalVariable
-        return l_x, raw_outputs, outputs
+        return l_x, (raw_outputs, outputs)
 
 
 class LanguageModel(nn.Module):
