@@ -317,7 +317,7 @@ if __name__ == '__main__':
     opt_fn = partial(torch.optim.SGD)  # , betas=params.adam_betas)
     l_a, l_b = len(text.LanguageModelLoader(np.concatenate(trn_lm), bs=bs, bptt=bptt)), \
                len(text.LanguageModelLoader(np.concatenate(wiki_trn_lm), bs=bs, bptt=bptt))
-    weights = torch.tensor([l_a/float(l_a+l_b), l_b/float(l_a+l_b)][::-1], dtype=torch.long)
+    weights = torch.tensor([l_a/float(l_a+l_b), l_b/float(l_a+l_b)][::-1], dtype=torch.float, device=device)
 
     # Load the pre-trained model
     parameter_dict = {'itos2': itos2}
