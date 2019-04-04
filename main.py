@@ -273,9 +273,9 @@ if __name__ == '__main__':
 
     # Pulling data from disk
     data_puller = DataPuller(debug=False, max_vocab=params.max_vocab_task, min_freq=params.min_vocab_freq, trim_trn=1000, trim_val=-1)
-    trn_lm, val_lm, _ = data_puller.get('imdb', supervised=False, trim=params.quick, cached=not params.quick)
+    trn_lm, val_lm, _ = data_puller.get('imdb', supervised=False, trim=params.quick, cached=True)
     wiki_trn_lm, wiki_val_lm, itos = data_puller.get('wikitext', supervised=False, trim=params.quick,
-                                                     merge_vocab=params.max_vocab_wiki, cached=not params.quick)
+                                                     merge_vocab=params.max_vocab_wiki, cached=True)
     vs = len(itos)
 
     """
@@ -315,7 +315,8 @@ if __name__ == '__main__':
     bptt = 70
     bs = params.bs
     opt_fn = partial(torch.optim.SGD)  # , betas=params.adam_betas)
-    l_a, l_b = len(text.LanguageModelLoader(trn_lm, bs=bs, bptt=bptt)), len(text.LanguageModelLoader(wiki_trn_lm, bs=bs, bptt=bptt))
+    l_a, l_b = len(text.LanguageModelLoader(np.concatenate(trn_lm), bs=bs, bptt=bptt)), \
+               len(text.LanguageModelLoader(np.concatenate(wiki_trn_lm), bs=bs, bptt=bptt))
     weights = torch.tensor([l_a/float(l_a+l_b), l_b/float(l_a+l_b)][::-1], dtype=torch.long)
 
     # Load the pre-trained model

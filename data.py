@@ -111,7 +111,6 @@ class DataPuller:
         # Get data from scratch or cache intelligently
         trn_texts, trn_labels, val_texts, val_labels, from_cache = self._get_(src, merge_vocab=merge_vocab, cached=cached)
 
-
         # Shuffle and Trim (if needed)
         trn_idx = np.random.permutation(len(trn_texts))
         val_idx = np.random.permutation(len(val_texts))
@@ -123,9 +122,7 @@ class DataPuller:
         trn_texts, trn_labels = [trn_texts[i] for i in trn_idx], [trn_labels[i] for i in trn_idx]
         val_texts, val_labels = [val_texts[i] for i in val_idx], [val_labels[i] for i in val_idx]
 
-        if not from_cache and not trim:
-            # Need to make vocab, vocabularize, and cache.
-
+        if not from_cache:
             """
                 Vocabulary preparation.
                 Two parts - making vocab, and converting the dataset.
@@ -133,12 +130,15 @@ class DataPuller:
                     if this is the first dataset being processed (self.processed is empty),
                         simply make vocab (itos,stoi)
                         and convert this dataset
-                        
+
                     if there are other datasets already made, then pass the `merge_vocab` arg to vocab making fn,
                         and correspondingly to the conversion function.
             """
             self._prepare_vocab_(trn_texts, merge_vocab if len(self.processed) > 0 else -1)
             trn_texts, val_texts = self._vocabularize_([trn_texts, val_texts])
+
+        if not from_cache and not trim:
+            # Need to cache it.
 
             # Cache things if enabled and this is the first dataset we're processing
             if cached and len(self.processed) == 0:
