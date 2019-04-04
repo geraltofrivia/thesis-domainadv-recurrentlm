@@ -214,15 +214,15 @@ class LanguageModel(nn.Module):
     def layers(self):
         return self.encoder.layers.extend(self.linear_dec.layers).extend(self.linear_dom.layers)
 
-    def predict(self, x):
+    def predict(self, x, d):
         with torch.no_grad():
             self.eval()
-            pred = self.forward(x)
+            pred = self.forward(x, d)
             self.train()
             return pred
 
 
-def _eval(y_pred, y_true):
+def _eval(y_pred, y_true, tasks: int=1, task_index: torch.tensor=None):
     """
         Expects a batch of input
 
@@ -230,6 +230,10 @@ def _eval(y_pred, y_true):
         :param y_true: tensor of shape (b, 1)
     """
     return torch.mean((torch.argmax(y_pred, dim=1) == y_true).float())
+
+
+def loss_wrapper(y_pred, y_true, loss_fn, **args):
+    return loss_fn(y_pred, y_true)
 
 
 if __name__ == '__main__':
@@ -325,8 +329,8 @@ if __name__ == '__main__':
 
     lm = LanguageModel(parameter_dict, device, _wgts_e=wgts_enc if PRETRAINED else None, _wgts_d=wgts_dec, _encargs=encargs)
     opt = make_opt(lm, opt_fn, lr=params.lr.init)
-    loss_main_fn = func.cross_entropy
-    loss_aux_fn = nn.CrossEntropyLoss(weights)
+    loss_main_fn = partial(loss_wrapper, loss_fn=func.cross_entropy)
+    loss_aux_fn = partial(loss_wrapper, loss_fn=nn.CrossEntropyLoss(weights))
 
     # Make data
     data_fn_unidomain = partial(text.LanguageModelLoader, bs=bs, bptt=bptt)

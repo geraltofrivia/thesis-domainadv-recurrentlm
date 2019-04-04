@@ -327,7 +327,7 @@ if __name__ == "__main__":
     for dataset in DATASETS:
 
         trn_texts_, trn_labels_, val_texts_, val_labels_, itos = data_puller.get(dataset, supervised=True,
-                                                                              trim=params.quick, cached=not params.quick)
+                                                                                 trim=params.quick, cached=True)
 
         # Lose label 2 from imdb
         if dataset == 'imdb':

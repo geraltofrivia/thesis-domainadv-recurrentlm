@@ -111,6 +111,7 @@ class DataPuller:
         # Get data from scratch or cache intelligently
         trn_texts, trn_labels, val_texts, val_labels, from_cache = self._get_(src, merge_vocab=merge_vocab, cached=cached)
 
+
         # Shuffle and Trim (if needed)
         trn_idx = np.random.permutation(len(trn_texts))
         val_idx = np.random.permutation(len(val_texts))
@@ -122,8 +123,7 @@ class DataPuller:
         trn_texts, trn_labels = [trn_texts[i] for i in trn_idx], [trn_labels[i] for i in trn_idx]
         val_texts, val_labels = [val_texts[i] for i in val_idx], [val_labels[i] for i in val_idx]
 
-        if not from_cache:
-
+        if not from_cache and not trim:
             # Need to make vocab, vocabularize, and cache.
 
             """
@@ -199,8 +199,6 @@ class DataPuller:
                 self.itos = pickle.load(open(cache_path / 'itos.pkl', 'rb'))
                 self.stoi = {v: k for k, v in enumerate(self.itos)}
 
-                self.processed.append(src)
-
                 return trn_texts, trn_labels, val_texts, val_labels, True
 
             except FileNotFoundError:
@@ -226,8 +224,6 @@ class DataPuller:
                 val_labels = np.load(cache_path / f'val_labels_{src}.npy')
                 self.itos = pickle.load(open(cache_path / f'itos_{src}.pkl', 'rb'))
                 self.stoi = {v: k for k, v in enumerate(self.itos)}
-
-                self.processed.append(src)
 
                 return trn_texts, trn_labels, val_texts, val_labels, True
 
