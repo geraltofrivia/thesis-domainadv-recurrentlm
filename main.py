@@ -397,7 +397,7 @@ if __name__ == '__main__':
 
     if not SAFE_MODE:
         # Start to put permanent things there, like the itos
-        mt_save(save_dir,
+        mt_save(save_dir, message=MESSAGE, message_fname="message_p2.txt",
                 pickle_stuff=[tosave('itos.pkl', itos)])
 
     args = {'epochs': 1, 'weight_decay': params.weight_decay, 'data': data,
@@ -438,7 +438,7 @@ if __name__ == '__main__':
 
     # Dumping stuff
     if not SAFE_MODE:
-        mt_save(save_dir, message=MESSAGE,
+        mt_save(save_dir, message=MESSAGE, message_fname="message_p2.txt",
                 torch_stuff=[tosave('unsup_model_final.torch', lm.state_dict()),
                              tosave('unsup_model_enc_final.torch', lm.encoder.state_dict())],
                 pickle_stuff=[tosave('final_unsup_traces.pkl', traces), tosave('unsup_options.pkl', params)])

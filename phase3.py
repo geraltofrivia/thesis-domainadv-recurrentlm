@@ -291,6 +291,8 @@ if __name__ == "__main__":
                     help="True if you want a verbose run")
     ap.add_argument("-sf", "--safemode", type=bool, required=False,
                     help="True if you dont want to save anything")
+    ap.add_argument("-m", "--message", type=str, required=False,
+                        help="Message to be saved alongwith traces", default=None)
     ap.add_argument("-ms", "--modelsuffix", default='_lowaux', type=str,
                     help="Input either `_lowaux`;`_hightrn` or nothing depending on which kind of model you want to load.")
     ap.add_argument("-md", "--modeldir", required=True,
@@ -306,6 +308,7 @@ if __name__ == "__main__":
     MODEL_SUFFIX = args['modelsuffix']
     SAFE_MODE = args['safemode']
     UNSUP_MODEL_DIR = PATH / 'models' / str(MODEL_NUM)
+    MESSAGE = args['message']
     DATASETS = args['datasets'].split(',')
 
     assert MODEL_SUFFIX in ['_lowaux', '_hightrn', '', '_final'], 'Incorrect Suffix given with which to load model'
@@ -488,6 +491,6 @@ if __name__ == "__main__":
     traces = [a+b for a, b in zip(traces, traces_new)]
 
     if not SAFE_MODE:
-        mt_save(UNSUP_MODEL_DIR,
+        mt_save(UNSUP_MODEL_DIR, message=MESSAGE, message_fname="message_p3.txt",
                 torch_stuff=[tosave('sup_model_final.torch', clf.state_dict())],
                 pickle_stuff=[tosave('final_sup_traces.pkl', traces), tosave('unsup_options.pkl', params)])
