@@ -279,11 +279,9 @@ if __name__ == '__main__':
     SAFE_MODE = parse_args['safemode']
     DATASETS = parse_args['datasets'].split(',')
 
-    if DATASETS == ['']:
-        DATASETS = []
-    else:
-        for dataset in DATASETS:
-            assert dataset in KNOWN_DATASETS, f"Couldn't find a dataset called {dataset}. Exiting."
+
+    for dataset in DATASETS:
+        assert dataset in KNOWN_DATASETS, f"Couldn't find a dataset called {dataset}. Exiting."
 
     params.message = MESSAGE
     params.quick = QUICK
@@ -369,15 +367,12 @@ if __name__ == '__main__':
         data_valid = [np.concatenate(val_lm_) for val_lm_ in val_lm]
         data = {'train': data_train, 'valid': data_valid}
         data_fn = partial(DomainAgnosticSampler, data_fn=data_fn_unidomain)
-    elif len(DATASETS) == 1:
+    else:
         data_fn_unidomain = partial(CustomLanguageModelLoader, bs=bs, bptt=bptt)
         data_train = [np.concatenate(trn_lm_) for trn_lm_ in trn_lm][0]
         data_valid = [np.concatenate(val_lm_) for val_lm_ in val_lm][0]
         data = {'train': data_train, 'valid': data_valid}
         data_fn = data_fn_unidomain
-    else:
-        # No dataset
-        data_fn_unidomain, data_train, data_valid, data, data_fn = [None] * 5
 
     # Set up lr and freeze stuff
     for grp in opt.param_groups:
@@ -386,10 +381,9 @@ if __name__ == '__main__':
     opt.param_groups[4]['lr'] = params.lr.init
 
     # lr_args = {'batches':, 'cycles': 1}
-    if len(DATASETS) > 0:
-        lr_args = {'iterations': len(data_fn(data=data['train'])),
-                   'cut_frac': params.lr.sltr_cutfrac, 'ratio': params.lr.sltr_ratio}
-        lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.SlantedTriangularLR)
+    lr_args = {'iterations': len(data_fn(data=data['train'])),
+               'cut_frac': params.lr.sltr_cutfrac, 'ratio': params.lr.sltr_ratio}
+    lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.SlantedTriangularLR)
 
     # Find places to save model
     save_dir = mt_save_dir(DUMP_PATH / '_'.join(DATASETS), _newdir=True) if not SAFE_MODE else ''
@@ -405,19 +399,6 @@ if __name__ == '__main__':
         # Start to put permanent things there, like the itos
         mt_save(save_dir,
                 pickle_stuff=[tosave('itos.pkl', itos)])
-
-    if len(DATASETS) == 0:
-
-        if not SAFE_MODE:
-            # Dump the model and vocab as it is!
-            mt_save(save_dir, message=MESSAGE,
-                    torch_stuff=[tosave('unsup_model_final.torch', lm.state_dict()),
-                                 tosave('unsup_model_enc_final.torch', lm.encoder.state_dict())],
-                    pickle_stuff=[tosave('itos.pkl', itos), tosave('unsup_options.pkl', params)])
-
-        # Nothing more to do. Quit.
-        warnings.warn("No dataset specified. Dumped the model, and vocab. Quitting the code now. Tschuss!")
-        exit()
 
     args = {'epochs': 1, 'weight_decay': params.weight_decay, 'data': data,
             'device': device, 'opt': opt, 'loss_main_fn': loss_main_fn, 'loss_aux_fn': loss_aux_fn,
