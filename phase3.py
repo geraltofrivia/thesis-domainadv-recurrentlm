@@ -133,7 +133,7 @@ class TextClassifier(nn.Module):
         '''
         self.linear = torch.nn.ModuleList([CustomPoolingLinearClassifier(layers=[400 * 3, 50, cls], drops=[dps[4], 0.1]).to(self.device)
                        for cls in n_classes])
-        self.domain_clf = p2.CustomLinear(layers=p2params.domclas_layers, drops=p2params.domclas_drops).to(self.device)
+        self.domain_clf = p2.CustomLinear(layers=p2params.domclas_layers + [len(n_classes)], drops=p2params.domclas_drops).to(self.device)
         self.encoder.reset()
 
     @property
@@ -327,6 +327,7 @@ if __name__ == "__main__":
     for dataset in DATASETS:
 
         trn_texts_, trn_labels_, val_texts_, val_labels_, itos = data_puller.get(dataset, supervised=True,
+                                                                                 merge_vocab=params.max_vocab_others,
                                                                                  trim=params.quick, cached=True)
 
         # Lose label 2 from imdb

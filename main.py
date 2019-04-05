@@ -26,7 +26,7 @@ from fastai import text, core, lm_rnn
 
 
 DEVICE = 'cuda:0'
-KNOWN_DATASETS = ['imdb', 'wikitext']
+KNOWN_DATASETS = ['imdb', 'wikitext', '']
 
 device = torch.device(DEVICE)
 np.random.seed(42)
@@ -60,48 +60,45 @@ class DomainAgnosticSampler:
                 `{'train': np.concatenate(trn_lm), 'valid': np.concatenate(val_lm)}['train']`
             data_fn (fastai's language model loader) flattens y and returns x of seqlen, batchsize
         """
-        data_a, data_b = data
-        self.args = {'data_fn': data_fn, 'data_a': data_a, 'data_b': data_b}
-        self.itera, self.iterb = iter([]), iter([])
+        self.args = {'data_fn': data_fn, 'data': data,}
+        self.iters = [iter([]) for _ in range(len(data))]
         self.reset(**self.args)
 
-    def reset(self, data_fn, data_a, data_b):
-        self.itera = iter(data_fn(data_a))
-        self.iterb = iter(data_fn(data_b))
+    def reset(self, data_fn: Callable, data: list):
+        self.iters = [iter(data_fn(data_)) for data_ in data]
 
     def __iter__(self):
         return self
 
     def __next__(self):
-        x_a, y_a = self.itera.__next__()
-        x_b, y_b = self.iterb.__next__()
-        return self._combine_batch_(x_a, x_b, y_a, y_b)
+        x,y = [], []
+        for iter_ in self.iters:
+            x_, y_ = iter_.__next__()
+            x.append(x_)
+            y.append(y_)
+        return self._combine_batch_(x, y)
 
     def __len__(self):
-        return min(len(self.args['data_fn'](self.args['data_a'])),
-                   len(self.args['data_fn'](self.args['data_b'])))
+        return min([len(self.args['data_fn'](data_)) for data_ in self.args['data'] ])
 
     @staticmethod
-    def _combine_batch_(x_a, x_b, y_a, y_b):
+    def _combine_batch_(x, y):
         """
-            :param x_a is a np.arr looks like seqlen, batchsize
-            :param y_a is a corresponding np.arr (one word ahead than x_a) which is a flattened x_a.shape mat
-             Same for x_b, y_b
+            :param x is a list of np.arr looks like seqlen, batchsize
+            :param y is a corresponding list of np.arr (one word ahead than x_a) which is a flattened x_a.shape mat
 
              Returns x, y, y_dom in similar shapes as input
         """
 
         # Get them to interpretable shapes
-        y_a = y_a.reshape(x_a.shape).transpose(1, 0)
-        y_b = y_b.reshape(x_b.shape).transpose(1, 0)
-        x_a = x_a.transpose(1, 0)
-        x_b = x_b.transpose(1, 0)
+        x = [x_.transpose(1, 0) for x_ in x]
+        y = [y_.reshape(x[0].shape).transpose(1, 0) for y_ in y]
 
-        b_bs, b_sl = x_a.shape[0], min(x_a.shape[1], x_b.shape[1])
+        b_bs, b_sl = x[0].shape[0], min([x_.shape[1] for x_ in x])
 
         # Concatenate to make an x and y
-        x = np.concatenate((x_a[:, :b_sl], x_b[:, :b_sl]))
-        y = np.concatenate((y_a[:, :b_sl], y_b[:, :b_sl]))
+        x = np.concatenate([x_[:, :b_sl] for x_ in x])
+        y = np.concatenate([y_[:, :b_sl] for y_ in x])
 
         # Shuffle and remember shuffle index to make y labels for domain agnostic training
         intrp = np.arange(b_bs * 2)
@@ -174,6 +171,7 @@ class LanguageModel(nn.Module):
                  _parameter_dict,
                  _device,
                  _encargs,
+                 _n_tasks=2,
                  _wgts_e=None,
                  _wgts_d=None):
         super(LanguageModel, self).__init__()
@@ -197,7 +195,7 @@ class LanguageModel(nn.Module):
             bias=False
         ).to(self.device)
 
-        self.linear_dom = CustomLinear(layers=params.domclas_layers, drops=params.domclas_drops).to(self.device)
+        self.linear_dom = CustomLinear(layers=params.domclas_layers + [_n_tasks], drops=params.domclas_drops).to(self.device)
         self.encoder.reset()
 
     def forward(self, x, d):
@@ -273,9 +271,16 @@ if __name__ == '__main__':
 
     # Pulling data from disk
     data_puller = DataPuller(debug=False, max_vocab=params.max_vocab_task, min_freq=params.min_vocab_freq, trim_trn=1000, trim_val=-1)
-    trn_lm, val_lm, _ = data_puller.get('imdb', supervised=False, trim=params.quick, cached=True)
-    wiki_trn_lm, wiki_val_lm, itos = data_puller.get('wikitext', supervised=False, trim=params.quick,
-                                                     merge_vocab=params.max_vocab_wiki, cached=True)
+
+    trn_lm, val_lm = [], []
+    for dataset in DATASETS:
+
+        trn_lm_, val_lm_, itos = data_puller.get(dataset, supervised=False, trim=params.quick, cached=True, merge_vocab=params.max_vocab_others)
+
+        # Append data to main lists
+        trn_lm.append(trn_lm_)
+        val_lm.append(val_lm_)
+
     vs = len(itos)
 
     """
@@ -286,8 +291,6 @@ if __name__ == '__main__':
         print("Pulling models from disk")
 
     em_sz, nh, nl = 400, 1150, 3
-    # PRE_PATH = PATH / 'models' / 'wt103'
-    # PRE_LM_PATH = PRE_PATH / 'fwd_wt103.h5'
     wgts = torch.load(PRE_LM_PATH, map_location=lambda storage, loc: storage)
     enc_wgts = core.to_np(wgts['0.encoder.weight'])
     row_m = enc_wgts.mean(0)
@@ -315,9 +318,10 @@ if __name__ == '__main__':
     bptt = 70
     bs = params.bs
     opt_fn = partial(torch.optim.SGD)  # , betas=params.adam_betas)
-    l_a, l_b = len(text.LanguageModelLoader(np.concatenate(trn_lm), bs=bs, bptt=bptt)), \
-               len(text.LanguageModelLoader(np.concatenate(wiki_trn_lm), bs=bs, bptt=bptt))
-    weights = torch.tensor([l_a/float(l_a+l_b), l_b/float(l_a+l_b)][::-1], dtype=torch.float, device=device)
+    lengths = np.array([len(text.LanguageModelLoader(np.concatenate(trn_lm_), bs=bs, bptt=bptt)) for trn_lm_ in trn_lm])
+    # l_a, l_b = len(text.LanguageModelLoader(np.concatenate(trn_lm), bs=bs, bptt=bptt)), \
+    #            len(text.LanguageModelLoader(np.concatenate(wiki_trn_lm), bs=bs, bptt=bptt))
+    weights = torch.tensor((lengths/np.sum(lengths))[::-1], dtype=torch.float, device=device)
 
     # Load the pre-trained model
     parameter_dict = {'itos2': itos2}
@@ -328,15 +332,16 @@ if __name__ == '__main__':
                'qrnn': False, 'dropouti': dps[0],
                'wdrop': dps[2], 'dropoute': dps[3], 'dropouth': dps[4]}
 
-    lm = LanguageModel(parameter_dict, device, _wgts_e=wgts_enc if PRETRAINED else None, _wgts_d=wgts_dec, _encargs=encargs)
+    lm = LanguageModel(parameter_dict, device, _encargs=encargs, _n_tasks=len(DATASETS),
+                       _wgts_e=wgts_enc if PRETRAINED else None, _wgts_d=wgts_dec)
     opt = make_opt(lm, opt_fn, lr=params.lr.init)
     loss_main_fn = partial(loss_wrapper, loss_fn=func.cross_entropy)
     loss_aux_fn = partial(loss_wrapper, loss_fn=nn.CrossEntropyLoss(weights))
 
     # Make data
     data_fn_unidomain = partial(text.LanguageModelLoader, bs=bs, bptt=bptt)
-    data_train = (np.concatenate(trn_lm), np.concatenate(wiki_trn_lm))
-    data_valid = (np.concatenate(val_lm), np.concatenate(wiki_val_lm))
+    data_train = [np.concatenate(trn_lm_) for trn_lm_ in trn_lm]
+    data_valid = [np.concatenate(val_lm_) for val_lm_ in val_lm]
     data = {'train': data_train, 'valid': data_valid}
     data_fn = partial(DomainAgnosticSampler, data_fn=data_fn_unidomain)
 

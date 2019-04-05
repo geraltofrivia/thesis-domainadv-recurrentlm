@@ -12,10 +12,10 @@ class Phase2:
     weight_decay = 0.0
     clip_grads_at = -1.0
     max_vocab_task = 60000
-    max_vocab_wiki = 1000
+    max_vocab_others = 1000
     min_vocab_freq = 2
 
-    domclas_layers = [400*3, 50, 2]
+    domclas_layers = [400*3, 50]
     phase1=True
 
     # Dropouts
@@ -37,7 +37,7 @@ class Phase3:
     clip_grads_at = -1.0
     weight_decay = 0
     max_vocab_task = 70000
-    max_vocab_wiki = 2000
+    max_vocab_others = 2000
     min_vocab_freq = 2
     loss_scale = 5.0
 
