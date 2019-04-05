@@ -25,7 +25,7 @@ os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 from fastai import text, core, lm_rnn
 
 
-DEVICE = 'cuda:0'
+DEVICE = 'cuda'
 KNOWN_DATASETS = ['imdb', 'wikitext', '']
 
 device = torch.device(DEVICE)
@@ -258,9 +258,11 @@ if __name__ == '__main__':
     SAFE_MODE = parse_args['safemode']
     DATASETS = parse_args['datasets'].split(',')
 
-    # Check args.
-    for dataset in DATASETS:
-        assert dataset in KNOWN_DATASETS, f"Couldn't find a dataset called {dataset}. Exiting."
+    if DATASETS == ['']:
+        DATASETS = []
+    else:
+        for dataset in DATASETS:
+            assert dataset in KNOWN_DATASETS, f"Couldn't find a dataset called {dataset}. Exiting."
 
     params.message = MESSAGE
     params.quick = QUICK
@@ -371,6 +373,19 @@ if __name__ == '__main__':
         # Start to put permanent things there, like the itos
         mt_save(save_dir,
                 pickle_stuff=[tosave('itos.pkl', itos)])
+
+    if len(DATASETS) == 0:
+
+        if not SAFE_MODE:
+            # Dump the model and vocab as it is!
+            mt_save(save_dir, message=MESSAGE,
+                    torch_stuff=[tosave('unsup_model_final.torch', lm.state_dict()),
+                                 tosave('unsup_model_enc_final.torch', lm.encoder.state_dict())],
+                    pickle_stuff=[tosave('itos.pkl', itos), tosave('unsup_options.pkl', params)])
+
+        # Nothing more to do. Quit.
+        warnings.warn("No dataset specified. Dumped the model, and vocab. Quitting the code now. Tschuss!")
+        exit()
 
     args = {'epochs': 1, 'weight_decay': params.weight_decay, 'data': data,
             'device': device, 'opt': opt, 'loss_main_fn': loss_main_fn, 'loss_aux_fn': loss_aux_fn,
