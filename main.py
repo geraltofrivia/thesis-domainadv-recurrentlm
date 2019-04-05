@@ -113,6 +113,13 @@ class DomainAgnosticSampler:
         return x, y, y_dom
 
 
+class CustomLanguageModelLoader(text.LanguageModelLoader):
+    """ Overwriting the class so we can call it within the same way of iterating over data as in other cases."""
+
+    def __init__(self, data, **args):
+        super().__init__(data, **args)
+
+
 '''
     Model definitions
 '''
@@ -321,7 +328,7 @@ if __name__ == '__main__':
     bptt = 70
     bs = params.bs
     opt_fn = partial(torch.optim.SGD)  # , betas=params.adam_betas)
-    lengths = np.array([len(text.LanguageModelLoader(np.concatenate(trn_lm_), bs=bs, bptt=bptt)) for trn_lm_ in trn_lm])
+    lengths = np.array([len(CustomLanguageModelLoader(np.concatenate(trn_lm_), bs=bs, bptt=bptt)) for trn_lm_ in trn_lm])
     # l_a, l_b = len(text.LanguageModelLoader(np.concatenate(trn_lm), bs=bs, bptt=bptt)), \
     #            len(text.LanguageModelLoader(np.concatenate(wiki_trn_lm), bs=bs, bptt=bptt))
     weights = torch.tensor(np.ascontiguousarray((lengths/np.sum(lengths))[::-1]), dtype=torch.float, device=device)
@@ -342,11 +349,20 @@ if __name__ == '__main__':
     loss_aux_fn = partial(loss_wrapper, loss_fn=nn.CrossEntropyLoss(weights))
 
     # Make data
-    data_fn_unidomain = partial(text.LanguageModelLoader, bs=bs, bptt=bptt)
-    data_train = [np.concatenate(trn_lm_) for trn_lm_ in trn_lm]
-    data_valid = [np.concatenate(val_lm_) for val_lm_ in val_lm]
-    data = {'train': data_train, 'valid': data_valid}
-    data_fn = partial(DomainAgnosticSampler, data_fn=data_fn_unidomain)
+    data_fn_unidomain = partial(CustomLanguageModelLoader, bs=bs, bptt=bptt)
+    if len(DATASETS) > 1:
+        data_train = [np.concatenate(trn_lm_) for trn_lm_ in trn_lm]
+        data_valid = [np.concatenate(val_lm_) for val_lm_ in val_lm]
+        data = {'train': data_train, 'valid': data_valid}
+        data_fn = partial(DomainAgnosticSampler, data_fn=data_fn_unidomain)
+    elif len(DATASETS) == 1:
+        data_train = [np.concatenate(trn_lm_) for trn_lm_ in trn_lm][0]
+        data_valid = [np.concatenate(val_lm_) for val_lm_ in val_lm][0]
+        data = {'train': data_train, 'valid': data_valid}
+        data_fn = data_fn_unidomain
+    else:
+        # No dataset
+        data_train, data_valid, data, data_fn = [None] * 4
 
     # Set up lr and freeze stuff
     for grp in opt.param_groups:
@@ -355,9 +371,10 @@ if __name__ == '__main__':
     opt.param_groups[4]['lr'] = params.lr.init
 
     # lr_args = {'batches':, 'cycles': 1}
-    lr_args = {'iterations': len(data_fn(data=data['train'])),
-               'cut_frac': params.lr.sltr_cutfrac, 'ratio': params.lr.sltr_ratio}
-    lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.SlantedTriangularLR)
+    if len(DATASETS) > 0:
+        lr_args = {'iterations': len(data_fn(data=data['train'])),
+                   'cut_frac': params.lr.sltr_cutfrac, 'ratio': params.lr.sltr_ratio}
+        lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.SlantedTriangularLR)
 
     # Find places to save model
     save_dir = mt_save_dir(DUMP_PATH / '_'.join(DATASETS), _newdir=True) if not SAFE_MODE else ''
