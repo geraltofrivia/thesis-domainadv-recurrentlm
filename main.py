@@ -91,14 +91,14 @@ class DomainAgnosticSampler:
         """
 
         # Get them to interpretable shapes
+        y = [y_.reshape(x[i].shape).transpose(1, 0) for i,y_ in enumerate(y)]
         x = [x_.transpose(1, 0) for x_ in x]
-        y = [y_.reshape(x[0].shape).transpose(1, 0) for y_ in y]
 
         b_bs, b_sl = x[0].shape[0], min([x_.shape[1] for x_ in x])
 
         # Concatenate to make an x and y
         x = np.concatenate([x_[:, :b_sl] for x_ in x])
-        y = np.concatenate([y_[:, :b_sl] for y_ in x])
+        y = np.concatenate([y_[:, :b_sl] for y_ in y])
 
         # Shuffle and remember shuffle index to make y labels for domain agnostic training
         intrp = np.arange(b_bs * 2)
@@ -265,6 +265,7 @@ if __name__ == '__main__':
     params.message = MESSAGE
     params.quick = QUICK
     params.datasets = DATASETS
+    if len(DATASETS) < 2: params.loss_scale = 0.0
 
     if DEBUG:
         print("Pulling data from disk")
@@ -321,7 +322,7 @@ if __name__ == '__main__':
     lengths = np.array([len(text.LanguageModelLoader(np.concatenate(trn_lm_), bs=bs, bptt=bptt)) for trn_lm_ in trn_lm])
     # l_a, l_b = len(text.LanguageModelLoader(np.concatenate(trn_lm), bs=bs, bptt=bptt)), \
     #            len(text.LanguageModelLoader(np.concatenate(wiki_trn_lm), bs=bs, bptt=bptt))
-    weights = torch.tensor((lengths/np.sum(lengths))[::-1], dtype=torch.float, device=device)
+    weights = torch.tensor(np.ascontiguousarray((lengths/np.sum(lengths))[::-1]), dtype=torch.float, device=device)
 
     # Load the pre-trained model
     parameter_dict = {'itos2': itos2}
