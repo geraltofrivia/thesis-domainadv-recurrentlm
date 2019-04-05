@@ -38,6 +38,7 @@ torch.manual_seed(42)
     Paths and macros
 '''
 PATH = Path('resources/proc/imdb')
+DUMPPATH = Path('resources/models/runs')
 DATA_PROC_PATH = PATH / 'data'
 DATA_LM_PATH = PATH / 'datalm'
 
@@ -307,9 +308,9 @@ if __name__ == "__main__":
     PRETRAINED = args['pretrained']
     MODEL_SUFFIX = args['modelsuffix']
     SAFE_MODE = args['safemode']
-    UNSUP_MODEL_DIR = PATH / 'models' / str(MODEL_NUM)
     MESSAGE = args['message']
     DATASETS = args['datasets'].split(',')
+    UNSUP_MODEL_DIR = DUMPPATH / '_'.join(DATASETS) / str(MODEL_NUM)
 
     assert MODEL_SUFFIX in ['_lowaux', '_hightrn', '', '_final'], 'Incorrect Suffix given with which to load model'
 

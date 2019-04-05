@@ -131,7 +131,7 @@ class CustomLanguageModelLoader(text.LanguageModelLoader):
             _res = list(res) + [torch.zeros(res[0].shape[1])]
             self.i += seq_len
             self.iter += 1
-            yield res
+            yield _res
 
 
 '''
@@ -292,7 +292,8 @@ if __name__ == '__main__':
         print("Pulling data from disk")
 
     # Pulling data from disk
-    data_puller = DataPuller(debug=False, max_vocab=params.max_vocab_task, min_freq=params.min_vocab_freq, trim_trn=1000, trim_val=-1)
+    data_puller = DataPuller(debug=False, max_vocab=params.max_vocab_task,
+                             min_freq=params.min_vocab_freq, trim_trn=1000, trim_val=1000)
 
     trn_lm, val_lm = [], []
     for dataset in DATASETS:
@@ -390,10 +391,10 @@ if __name__ == '__main__':
     save_fnames = {'torch_stuff':
                        {'hightrn':
                             {'model': 'unsup_model_hightrn.torch',
-                             'enc': 'unsup_model_hightrn_enc.torch'},
+                             'enc': 'unsup_model_enc_hightrn.torch'},
                         'lowaux':
                             {'model': 'unsup_model_lowaux.torch',
-                             'enc': 'unsup_model_lowaux_enc.torch'}}}
+                             'enc': 'unsup_model_enc_lowaux.torch'}}}
 
     if not SAFE_MODE:
         # Start to put permanent things there, like the itos
