@@ -284,24 +284,25 @@ if __name__ == "__main__":
 
     # Get args from console
     ap = argparse.ArgumentParser()
-    ap.add_argument("-q", "--quick", type=bool, required=False,
+    ap.add_argument("-q", "--quick", type=str2bool, required=False, default=False,
                     help="True if you want to only train on first 1000 train,test samples")
-    ap.add_argument("-d", "--debug", type=bool, required=False,
+    ap.add_argument("--debug", type=str2bool, required=False, default=True,
                     help="True if you want a verbose run")
-    ap.add_argument("-p", "--pretrained", type=bool, required=False,
+    ap.add_argument("-p", "--pretrained", type=str2bool, required=False, default=True,
                     help="True if you want a verbose run")
-    ap.add_argument("-sf", "--safemode", type=bool, required=False,
+    ap.add_argument("-sf", "--safemode", type=str2bool, required=False,
                     help="True if you dont want to save anything")
-    ap.add_argument("-m", "--message", type=str, required=False,
-                        help="Message to be saved alongwith traces", default=None)
-    ap.add_argument("-ms", "--modelsuffix", default='_lowaux', type=str,
-                    help="Input either `_lowaux`;`_hightrn` or nothing depending on which kind of model you want to load.")
+    ap.add_argument("-m", "--message", type=str, required=False, default='Default Message',
+                        help="Message to be saved alongwith traces")
+    ap.add_argument("-ms", "--modelsuffix", default='_lowaux', type=str, required=True,
+                    help="Input either `_lowaux`;`_hightrn`;`_final` or nothing depending on which kind of model you want to load.")
     ap.add_argument("-md", "--modeldir", required=True,
                     help="Need to provide the folder name (not the entire dir) to the desired phase 2 model. E.g. `--modeldir 2` shall suffice.")
-    ap.add_argument("-d", "--datasets", type=str, required=False, default="imdb,wikitext",
+    ap.add_argument("-d", "--datasets", type=str, required=True,
                     help="Comma separated two dataset names like wikitext,imdb")
 
     args = vars(ap.parse_args())
+
     QUICK = args['quick']
     DEBUG = args['debug']
     MODEL_NUM = args['modeldir']
