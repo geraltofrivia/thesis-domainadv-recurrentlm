@@ -282,7 +282,6 @@ if __name__ == '__main__':
     DATASETS = parse_args['datasets'].split(',')
     LOSS_SCALE = parse_args['lambda']
 
-
     for dataset in DATASETS:
         assert dataset in KNOWN_DATASETS, f"Couldn't find a dataset called {dataset}. Exiting."
 

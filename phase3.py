@@ -187,9 +187,24 @@ class TextClassifier(nn.Module):
 
 
 def epoch_end_hook(opt: torch.optim, lr_schedule: mtlr.LearningRateScheduler) -> None:
+    """
+        At the end of every epoch, we unfreeze just one more layer. Oh well.
+        We find the  last frozen layer (starting from the last one) and unfreeze it with init lr.
+
+    :param opt: optimizer which has apt param groups
+    :param lr_schedule: the schedule we want to reset.
+    :return: Nada
+    """
     # @TODO: instead of constant lr, add lr reset recipe here.
-    for pg in opt.param_groups:
-        pg['lr'] = params.lr.init
+
+    # Last frozen layer:
+    for i, pg in opt.param_groups[::-1]:
+        if pg['lr'] == 0.0:
+
+            # i (starting from bottom) is the last frozen layer.
+            pg['lr'] = params.lr.init
+            break
+
     lr_schedule.reset()
 
 
@@ -432,6 +447,7 @@ if __name__ == "__main__":
         @TODO: save_above_trn, save_below_aux needs to be fixed to handle multiple values!!
         
     '''
+    # Freeze all layers
     # opt.param_groups[-1]['lr'] = 0.01
     traces = utils.dann_loop(**args)
 
