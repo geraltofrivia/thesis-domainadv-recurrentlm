@@ -270,6 +270,8 @@ if __name__ == '__main__':
                         help="False if you don't want to load pretrained weights in LM")
     parser.add_argument("-d", "--datasets", type=str, required=True,
                         help="Comma separated two dataset names like wikitext,imdb")
+    parser.add_argument("-l", "--lambda", type=float, required=False,
+                        help="Desired value of loss scale factor for dann module")
 
     parse_args = vars(parser.parse_args())
     QUICK = parse_args['quick']
@@ -278,6 +280,8 @@ if __name__ == '__main__':
     MESSAGE = parse_args['message']
     SAFE_MODE = parse_args['safemode']
     DATASETS = parse_args['datasets'].split(',')
+    LOSS_SCALE = parse_args['lambda']
+
 
     for dataset in DATASETS:
         assert dataset in KNOWN_DATASETS, f"Couldn't find a dataset called {dataset}. Exiting."
@@ -285,6 +289,8 @@ if __name__ == '__main__':
     params.message = MESSAGE
     params.quick = QUICK
     params.datasets = DATASETS
+    if LOSS_SCALE is not None:
+        params.loss_scale = LOSS_SCALE
     if len(DATASETS) < 2: params.loss_scale = 0.0
 
     if DEBUG:

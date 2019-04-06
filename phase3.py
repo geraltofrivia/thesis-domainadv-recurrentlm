@@ -300,6 +300,8 @@ if __name__ == "__main__":
                     help="Need to provide the folder name (not the entire dir) to the desired phase 2 model. E.g. `--modeldir 2` shall suffice.")
     ap.add_argument("-d", "--datasets", type=str, required=True,
                     help="Comma separated two dataset names like wikitext,imdb")
+    ap.add_argument("-l", "--lambda", type=float, required=False,
+                        help="Desired value of loss scale factor for dann module")
 
     args = vars(ap.parse_args())
 
@@ -311,6 +313,7 @@ if __name__ == "__main__":
     SAFE_MODE = args['safemode']
     MESSAGE = args['message']
     DATASETS = args['datasets'].split(',')
+    LOSS_SCALE = args['lambda']
     UNSUP_MODEL_DIR = DUMPPATH / '_'.join(DATASETS) / str(MODEL_NUM)
 
     assert MODEL_SUFFIX in ['_lowaux', '_hightrn', '', '_final'], 'Incorrect Suffix given with which to load model'
@@ -319,6 +322,8 @@ if __name__ == "__main__":
     params.model_dir = str(UNSUP_MODEL_DIR) + ' and ' + str(MODEL_NUM)
     params.model_suffix = MODEL_SUFFIX
     params.datasets = DATASETS
+    if LOSS_SCALE is not None:
+        params.loss_scale = LOSS_SCALE
 
     # Create representations of text using old itos
     itos_path = UNSUP_MODEL_DIR / 'itos.pkl'
