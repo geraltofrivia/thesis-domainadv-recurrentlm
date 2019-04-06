@@ -258,33 +258,26 @@ def loss_wrapper(y_pred, y_true, loss_fn, **args):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Domain adversarial for ULMFiT\'s language models')
-    parser.add_argument("-q", "--quick", type=str2bool, required=False, default=False,
-                        help="True if you want to only train on first 1000 train,test samples")
     parser.add_argument("--debug", type=str2bool, required=False, default=True,
                         help="True if you want a verbose run")
-    parser.add_argument("-sf", "--safemode", type=str2bool, required=False, default=False,
-                        help="True if you dont want to save anything")
     parser.add_argument("-m", "--message", type=str, required=False, default="Default message",
                         help="Message to be saved alongwith traces")
-    parser.add_argument("-p", "--pretrained", type=str2bool, required=False, default=True,
-                        help="False if you don't want to load pretrained weights in LM")
     parser.add_argument("-d", "--datasets", type=str, required=True,
                         help="Comma separated two dataset names like wikitext,imdb")
 
     parse_args = vars(parser.parse_args())
-    QUICK = parse_args['quick']
     DEBUG = parse_args['debug']
-    PRETRAINED = parse_args['pretrained']
     MESSAGE = parse_args['message']
-    SAFE_MODE = parse_args['safemode']
     DATASETS = parse_args['datasets'].split(',')
+    SAFE_MODE = False
+    PRETRAINED = True
 
     for dataset in DATASETS:
         assert dataset in KNOWN_DATASETS, f"Couldn't find a dataset called {dataset}. Exiting."
 
     params.message = MESSAGE
-    params.quick = QUICK
     params.datasets = DATASETS
+    params.quick = False
 
     if DEBUG:
         print("Pulling data from disk")
