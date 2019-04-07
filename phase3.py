@@ -198,7 +198,7 @@ def epoch_end_hook(opt: torch.optim, lr_schedule: mtlr.LearningRateScheduler) ->
     # @TODO: instead of constant lr, add lr reset recipe here.
 
     # Last frozen layer:
-    for i, pg in opt.param_groups[::-1]:
+    for i, pg in enumerate(opt.param_groups[::-1]):
         if pg['lr'] == 0.0:
 
             # i (starting from bottom) is the last frozen layer.
@@ -405,8 +405,8 @@ if __name__ == "__main__":
         # Weights dont make sense if only one domain is being worked with
         loss_aux_fn = partial(domain_classifier_loss, loss_fn=torch.nn.CrossEntropyLoss())
     opt_fn = partial(optim.Adam, betas=params.adam_betas)
-    opt = make_opt(clf, opt_fn, lr=params.lr.init)
-    # opt.param_groups[-1]['lr'] = 0.01
+    opt = make_opt(clf, opt_fn, lr=0.0)
+    opt.param_groups[-1]['lr'] = params.lr.init
 
     # Make data
     data_fn = partial(utils.DomainAgnosticSortishSampler, _batchsize=bs, _padidx=1)

@@ -248,7 +248,7 @@ def _eval(y_pred, y_true, tasks: int=1, task_index: torch.tensor=None):
         :param y_pred: tensor of shape (b, nc)
         :param y_true: tensor of shape (b, 1)
     """
-    return torch.mean((torch.argmax(y_pred, dim=1) == y_true).float())
+    return torch.mean((torch.argmax(y_pred, dim=1) == y_true).float()).item()
 
 
 def loss_wrapper(y_pred, y_true, loss_fn, **args):

@@ -313,6 +313,7 @@ def dann_loop(epochs: int,
                 if batch_end_hook:
                     batch_end_hook()
 
+            del _x, _y, _y_aux
             if epoch_end_hook:
                 epoch_end_hook()
 
@@ -332,6 +333,8 @@ def dann_loop(epochs: int,
 
                 # NOTE: here value nan signals that no element of that task existed here. Need to take care of these nans later.
                 per_epoch_vl_acc.append(eval_fn(y_pred=y_pred, y_true=_y, tasks=tasks, task_index=_y_aux))
+
+            del _x, _y, _y_aux
 
         # Convert accuracy 2-D arrays to numpy array for easier lookup and shit
         per_epoch_tr_acc_main, per_epoch_tr_acc_aux, per_epoch_vl_acc = \
