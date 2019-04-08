@@ -186,24 +186,15 @@ class TextClassifier(nn.Module):
             return predicted
 
 
-def epoch_end_hook(opt: torch.optim, baselrs: Union[list, np.ndarray, float], lr_schedule: mtlr.LearningRateScheduler) -> None:
+def epoch_end_hook(lr_schedule: mtlr.LearningRateScheduler) -> None:
     """
-        At the end of every epoch, we unfreeze just one more layer. Oh well.
-        We find the  last frozen layer (starting from the last one) and unfreeze it with init lr.
+        Calling the lr schedule to unfreeze one layer and unfreezing one layer.
 
-    :param opt: optimizer which has apt param groups
     :param lr_schedule: the schedule we want to reset.
     :return: Nada
     """
-    # @TODO: instead of constant lr, add lr reset recipe here.
-    if type(baselrs) is float:
-        baselrs = [baselrs for _ in opt.param_groups]
 
-    # Last frozen layer:
-    for i, (pg, lr) in enumerate(zip(opt.param_groups, baselrs)):
-
-        pg['lr'] = lr
-
+    lr_schedule.unfreeze()
     lr_schedule.reset()
 
 
@@ -230,15 +221,6 @@ def _list_eval(y_pred: list, y_true: torch.Tensor, tasks: int = 1, task_index: t
         return torch.mean(acc).item()
 
     return [torch.mean(torch.masked_select(acc, task_index == task)).item() for task in range(tasks)]
-
-# # noinspection PyUnresolvedReferences
-# def _list_eval(y_pred, y_true):
-#     """
-#         Expects a batch of input
-#         :param y_pred: tensor of shape (b, nc)
-#         :param y_true: tensor of shape (b, 1)
-#     """
-#     return torch.mean((custom_argmax(y_pred, dim=1) == y_true).float())
 
 
 # noinspection PyUnresolvedReferences
@@ -404,8 +386,7 @@ if __name__ == "__main__":
         # Weights dont make sense if only one domain is being worked with
         loss_aux_fn = partial(domain_classifier_loss, loss_fn=torch.nn.CrossEntropyLoss())
     opt_fn = partial(optim.Adam, betas=params.adam_betas)
-    opt = make_opt(clf, opt_fn, lr=0.0)
-    opt.param_groups[-1]['lr'] = params.lr.init
+    opt = make_opt(clf, opt_fn, lr=params.lr.init)
 
     # Make data
     data_fn = partial(utils.DomainAgnosticSortishSampler, _batchsize=bs, _padidx=1)
@@ -415,8 +396,10 @@ if __name__ == "__main__":
 
     # Make lr scheduler
     org_iterations = len(data_fn(data_train))
+    freeze_mask =  np.array([0 for _ in opt.param_groups])
+    freeze_mask[-1] = 1
     lr_args = {'iterations': org_iterations, 'cycles': 1}
-    lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
+    lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR, freeze_mask=freeze_mask)
 
     save_args = {'torch_stuff': [tosave('model.torch', clf.state_dict()), tosave('model_enc.torch', clf.encoder.state_dict())]}
     save_fnames = {'torch_stuff':
@@ -430,7 +413,7 @@ if __name__ == "__main__":
     args = {'epochs': 1, 'epoch_count': 0, 'data': data, 'device': device, 'opt': opt,
             'loss_main_fn': loss_main_fn, 'loss_aux_fn': loss_aux_fn, 'model': clf,
             'train_fn': clf, 'predict_fn': clf.predict, 'train_aux_fn': clf.domain,
-            'epoch_end_hook': partial(epoch_end_hook, opt=opt, lr_schedule=lr_schedule, baselrs=params.lr.init),
+            'epoch_end_hook': partial(epoch_end_hook, lr_schedule=lr_schedule),
             'weight_decay': params.weight_decay, 'clip_grads_at': params.clip_grads_at, 'lr_schedule': lr_schedule,
             'loss_aux_scale': params.loss_scale if len(DATASETS) > 1 else 0, 'tasks': len(DATASETS),
             'data_fn': data_fn, 'eval_fn': _list_eval, 'eval_aux_fn': _eval,
