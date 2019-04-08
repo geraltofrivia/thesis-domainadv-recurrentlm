@@ -290,10 +290,12 @@ if __name__ == "__main__":
                     help="True if you dont want to save anything")
     ap.add_argument("-m", "--message", type=str, required=False, default='Default Message',
                         help="Message to be saved alongwith traces")
-    ap.add_argument("-ms", "--modelsuffix", default='_lowaux', type=str, required=True,
+    ap.add_argument("-ms", "--modelsuffix", default='', type=str, required=False,
                     help="Input either `_lowaux`;`_hightrn`;`_final` or nothing depending on which kind of model you want to load.")
-    ap.add_argument("-md", "--modeldir", required=True,
+    ap.add_argument("-mn", "--modelnum", required=True,
                     help="Need to provide the folder name (not the entire dir) to the desired phase 2 model. E.g. `--modeldir 2` shall suffice.")
+    ap.add_argument("-md", "--modeldir", required=False,
+                    help="Overwrites where to get the data from.")
     ap.add_argument("-d", "--datasets", type=str, required=True,
                     help="Comma separated two dataset names like wikitext,imdb")
     ap.add_argument("-l", "--lambda", type=float, required=False,
@@ -303,14 +305,19 @@ if __name__ == "__main__":
 
     QUICK = args['quick']
     DEBUG = args['debug']
-    MODEL_NUM = args['modeldir']
+    MODEL_NUM = args['modelnum']
     PRETRAINED = args['pretrained']
     MODEL_SUFFIX = args['modelsuffix']
+    MODEL_DIR = args['modeldir']
     SAFE_MODE = args['safemode']
     MESSAGE = args['message']
     DATASETS = args['datasets'].split(',')
     LOSS_SCALE = args['lambda']
-    UNSUP_MODEL_DIR = DUMPPATH / '_'.join(DATASETS) / str(MODEL_NUM)
+
+    if MODEL_DIR is None:
+        UNSUP_MODEL_DIR = DUMPPATH / '_'.join(DATASETS) / str(MODEL_NUM)
+    else:
+        UNSUP_MODEL_DIR = DUMPPATH / MODEL_DIR / str(MODEL_NUM)
 
     assert MODEL_SUFFIX in ['_lowaux', '_hightrn', '', '_final'], 'Incorrect Suffix given with which to load model'
 
