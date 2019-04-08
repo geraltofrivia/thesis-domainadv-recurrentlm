@@ -186,7 +186,7 @@ class TextClassifier(nn.Module):
             return predicted
 
 
-def epoch_end_hook(opt: torch.optim, lr_schedule: mtlr.LearningRateScheduler) -> None:
+def epoch_end_hook(opt: torch.optim, baselrs: Union[list, np.ndarray, float], lr_schedule: mtlr.LearningRateScheduler) -> None:
     """
         At the end of every epoch, we unfreeze just one more layer. Oh well.
         We find the  last frozen layer (starting from the last one) and unfreeze it with init lr.
@@ -196,14 +196,13 @@ def epoch_end_hook(opt: torch.optim, lr_schedule: mtlr.LearningRateScheduler) ->
     :return: Nada
     """
     # @TODO: instead of constant lr, add lr reset recipe here.
+    if type(baselrs) is float:
+        baselrs = [baselrs for _ in opt.param_groups]
 
     # Last frozen layer:
-    for i, pg in enumerate(opt.param_groups[::-1]):
-        if pg['lr'] == 0.0:
+    for i, (pg, lr) in enumerate(zip(opt.param_groups, baselrs)):
 
-            # i (starting from bottom) is the last frozen layer.
-            pg['lr'] = params.lr.init
-            break
+        pg['lr'] = lr
 
     lr_schedule.reset()
 
@@ -415,7 +414,8 @@ if __name__ == "__main__":
     data = {'train': data_train, 'valid': data_valid}
 
     # Make lr scheduler
-    lr_args = {'iterations': len(data_fn(data_train)), 'cycles': 1}
+    org_iterations = len(data_fn(data_train))
+    lr_args = {'iterations': org_iterations, 'cycles': 1}
     lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
 
     save_args = {'torch_stuff': [tosave('model.torch', clf.state_dict()), tosave('model_enc.torch', clf.encoder.state_dict())]}
@@ -430,8 +430,8 @@ if __name__ == "__main__":
     args = {'epochs': 1, 'epoch_count': 0, 'data': data, 'device': device, 'opt': opt,
             'loss_main_fn': loss_main_fn, 'loss_aux_fn': loss_aux_fn, 'model': clf,
             'train_fn': clf, 'predict_fn': clf.predict, 'train_aux_fn': clf.domain,
-            'epoch_end_hook': partial(epoch_end_hook, opt=opt, lr_schedule=lr_schedule), 'weight_decay': params.weight_decay,
-            'clip_grads_at': params.clip_grads_at, 'lr_schedule': lr_schedule,
+            'epoch_end_hook': partial(epoch_end_hook, opt=opt, lr_schedule=lr_schedule, baselrs=params.lr.init),
+            'weight_decay': params.weight_decay, 'clip_grads_at': params.clip_grads_at, 'lr_schedule': lr_schedule,
             'loss_aux_scale': params.loss_scale if len(DATASETS) > 1 else 0, 'tasks': len(DATASETS),
             'data_fn': data_fn, 'eval_fn': _list_eval, 'eval_aux_fn': _eval,
             'save': not SAFE_MODE, 'save_params': params, 'save_dir': UNSUP_MODEL_DIR, 'save_fnames': save_fnames}
@@ -448,63 +448,31 @@ if __name__ == "__main__":
         
     '''
     # Freeze all layers
-    # opt.param_groups[-1]['lr'] = 0.01
     traces = utils.dann_loop(**args)
 
-    # opt.param_groups[-1]['lr'] = 0.01
-    # opt.param_groups[-2]['lr'] = 0.005
-    lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
-    args['lr_schedule'] = lr_schedule
     args['save_above_trn'] = np.max(traces[utils.TRACES_FORMAT['train_acc_main']])
     args['epoch_count'] += 1
     traces_new = utils.dann_loop(**args)
     traces = [a+b for a, b in zip(traces, traces_new)]
 
-    # opt.param_groups[-1]['lr'] = 0.01
-    # opt.param_groups[-2]['lr'] = 0.005
-    # opt.param_groups[-3]['lr'] = 0.001
-    lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
-    args['lr_schedule'] = lr_schedule
     args['save_above_trn'] = np.max(traces[utils.TRACES_FORMAT['train_acc_main']])
     args['epoch_count'] += 1
     traces_new = utils.dann_loop(**args)
     traces = [a+b for a, b in zip(traces, traces_new)]
 
-    # opt.param_groups[-1]['lr'] = 0.01
-    # opt.param_groups[-2]['lr'] = 0.005
-    # opt.param_groups[-3]['lr'] = 0.001
-    # opt.param_groups[-4]['lr'] = 0.001
-    lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
-    args['lr_schedule'] = lr_schedule
     args['save_above_trn'] = np.max(traces[utils.TRACES_FORMAT['train_acc_main']])
     args['save_above_aux'] = np.min(traces[utils.TRACES_FORMAT['train_acc_aux']][2:])
     args['epoch_count'] += 1
     traces_new = utils.dann_loop(**args)
     traces = [a+b for a, b in zip(traces, traces_new)]
 
-    # opt.param_groups[-1]['lr'] = 0.01
-    # opt.param_groups[-2]['lr'] = 0.005
-    # opt.param_groups[-3]['lr'] = 0.001
-    # opt.param_groups[-4]['lr'] = 0.001
-    # opt.param_groups[-5]['lr'] = 0.001
-    lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
-    args['lr_schedule'] = lr_schedule
     args['save_above_trn'] = np.max(traces[utils.TRACES_FORMAT['train_acc_main']])
     args['save_above_aux'] = np.min(traces[utils.TRACES_FORMAT['train_acc_aux']][2:])
     args['epoch_count'] += 1
     traces_new = utils.dann_loop(**args)
     traces = [a+b for a, b in zip(traces, traces_new)]
 
-    # opt.param_groups[-1]['lr'] = 0.01
-    # opt.param_groups[-2]['lr'] = 0.005
-    # opt.param_groups[-3]['lr'] = 0.001
-    # opt.param_groups[-4]['lr'] = 0.001
-    # opt.param_groups[-5]['lr'] = 0.001
-    lr_args['cycles'] = 15
-    lr_args['iterations'] *= 15
     args['epochs'] = 15
-    lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR)
-    args['lr_schedule'] = lr_schedule
     args['save_above_trn'] = np.max(traces[utils.TRACES_FORMAT['train_acc_main']])
     args['save_above_aux'] = np.min(traces[utils.TRACES_FORMAT['train_acc_aux']][2:])
     args['epoch_count'] += 1
