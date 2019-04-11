@@ -289,7 +289,7 @@ if __name__ == "__main__":
     ap.add_argument("-sf", "--safemode", type=str2bool, required=False,
                     help="True if you dont want to save anything")
     ap.add_argument("-m", "--message", type=str, required=False, default='Default Message',
-                        help="Message to be saved alongwith traces")
+                    help="Message to be saved alongwith traces")
     ap.add_argument("-ms", "--modelsuffix", default='', type=str, required=False,
                     help="Input either `_lowaux`;`_hightrn`;`_final` or nothing depending on which kind of model you want to load.")
     ap.add_argument("-mn", "--modelnum", required=True,
