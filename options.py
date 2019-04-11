@@ -23,7 +23,7 @@ class Phase2:
     decoder_drops = 0.1 * 0.7
     domclas_drops = [0.2, 0.1]
 
-    bs = 20
+    bs = 10
     loss_scale = 5.0
 
 
@@ -32,7 +32,7 @@ class Phase3:
         init=0.003,
     )
     encoder_dropouts = np.asarray([0.4, 0.5, 0.05, 0.3, 0.4]) * 0.5
-    bs = 24
+    bs = 10
     adam_betas = (0.7, 0.99)
     clip_grads_at = -1.0
     weight_decay = 0
@@ -64,5 +64,5 @@ class _Phase2:
     decoder_drops = 0.1 * 0.7
     domclas_drops = [0.2, 0.1]
 
-    bs = 24
+    bs = 12
     loss_scale = 0.5
