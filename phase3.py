@@ -140,8 +140,16 @@ class TextClassifier(nn.Module):
     @property
     def layers(self):
         layers = [x for x in self.encoder.layers]
-        layers += [x for linear in self.linear for x in linear.layers]
-        layers += [x for x in self.domain_clf.layers]
+        len_layers = [len(lin.layers) for lin in self.linear] + [len(self.domain_clf.layers)]
+        srcs = [lin for lin in self.linear] + [self.domain_clf]
+        for i in range(max(len_layers)):
+            tmp_layers = []
+            for src in range(len(srcs)):
+                if len_layers[src] != 0:
+                    tmp_layers.append(srcs[src].layers[i])
+                    len_layers[src] -= 1
+            layers.append(torch.nn.ModuleList(tmp_layers))
+
         return torch.nn.ModuleList(layers)
 
     def forward(self, x: torch.tensor, domain: torch.tensor):
@@ -475,3 +483,26 @@ if __name__ == "__main__":
         mt_save(UNSUP_MODEL_DIR, message=MESSAGE, message_fname="message_p3.txt",
                 torch_stuff=[tosave('sup_model_final.torch', clf.state_dict())],
                 pickle_stuff=[tosave('final_sup_traces.pkl', traces), tosave('unsup_options.pkl', params)])
+
+    def understand_traces(traces):
+        # Simply find places where each of trn acc is highest
+        trn_ids = np.argmax(np.array(traces[utils.TRACES_FORMAT['train_acc_main']]), axis=0)
+        ids = list(np.unique(trn_ids))
+
+        # Find where vals is highest
+        val_ids = np.argmax(np.array(traces[utils.TRACES_FORMAT['val_acc']]), axis=0)
+        ids.extend(list(np.unique(val_ids)))
+
+        # Find where dom is lowest
+        dom_ids = np.argmin(np.array(traces[utils.TRACES_FORMAT['train_acc_aux']][3:]), axis=0) + 3
+        ids.extend(list(np.unique(dom_ids)))
+
+        _ids = ids[0]
+        # Now to print these things
+        for _ids in ids:
+            print(f'@{_ids:3d}: ',
+                  np.around(traces[utils.TRACES_FORMAT['train_acc_main']][_ids], decimals=4),
+                  '|', np.around(traces[utils.TRACES_FORMAT['val_acc']][_ids], decimals=4),
+                  '|', np.around(traces[utils.TRACES_FORMAT['train_acc_aux']][_ids], decimals=4))
+
+    understand_traces(traces)
