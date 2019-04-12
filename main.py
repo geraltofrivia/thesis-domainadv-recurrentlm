@@ -26,7 +26,7 @@ from fastai import text, core, lm_rnn
 
 
 DEVICE = 'cuda'
-KNOWN_DATASETS = ['imdb', 'wikitext', 'trec']
+KNOWN_DATASETS = ['imdb', 'wikitext', 'trec', 'cornell']
 
 device = torch.device(DEVICE)
 np.random.seed(42)

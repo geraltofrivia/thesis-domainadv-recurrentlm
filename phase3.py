@@ -46,7 +46,7 @@ LM_PATH = Path('resources/models')
 LM_PATH.mkdir(exist_ok=True)
 PRE_PATH = LM_PATH / 'wt103'
 PRE_LM_PATH = PRE_PATH / 'fwd_wt103.h5'
-KNOWN_DATASETS = {'imdb': 2, 'trec': 6}
+KNOWN_DATASETS = {'imdb': 2, 'trec': 6, 'cornell': 2}
 
 
 '''
