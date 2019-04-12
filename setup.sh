@@ -42,6 +42,12 @@ wget http://cogcomp.org/Data/QA/QC/TREC_10.label -P ./raw/trec/
 mv raw/trec/train_5500.label raw/trec/train
 mv raw/trec/TREC_10.label raw/trec/test
 
+# Download Cornell Moview Review dataset
+echo "Downloading Cornell Movie review dataset"
+mkdir raw/cornell
+wget https://www.cs.cornell.edu/people/pabo/movie-review-data/review_polarity.tar.gz -P ./raw/cornell/
+tar -zxvf ./raw/cornell/review_polarity.tar.gz -C ./raw/cornell/
+
 # Download pretrained model
 echo "Finally, lets download the pretrained model and we're good to go."
 mkdir resources

@@ -44,6 +44,9 @@ WIKI_DATA_PATH.mkdir(exist_ok=True)
 IMDB_DATA_PATH.mkdir(exist_ok=True)
 YELP_DATA_PATH.mkdir(exist_ok=True)
 
+CORNELL_DATA_PATH = Path('./raw/cornell/txt_sentoken/')
+CORNELL_DATA_PATH.mkdir(exist_ok=True)
+
 
 class DataPuller:
 
@@ -242,6 +245,19 @@ class DataPuller:
         trn_texts, trn_lbl = self.__imdb_pull_from_disk__(IMDB_DATA_PATH / 'train')
         val_texts, val_lbl = self.__imdb_pull_from_disk__(IMDB_DATA_PATH / 'test')
 
+        return self.__common_preprocessing_(trn_texts, trn_lbl, val_texts, val_lbl, _distribute=True)
+
+    def _cornell_(self) -> (List[str], List[int], List[str], List[int]):
+        """ Pulls cornell movie review dataset, split in traintest and tokenize and return"""
+        texts, labels = self.__imdb_pull_from_disk__(CORNELL_DATA_PATH)
+
+        np.random.seed(42)
+        idx = np.random.permutation(len(texts))
+        trn_idx, val_idx = idx[:int(idx.shape[0] * 0.8)], idx[int(idx.shape[0] * 0.8):]
+
+        trn_texts, trn_lbl = [texts[i] for i in trn_idx], [labels[i] for i in trn_idx]
+        val_texts, val_lbl = [texts[i] for i in val_idx], [labels[i] for i in val_idx]
+
         return self.__common_preprocessing_(trn_texts, trn_lbl, val_texts, val_lbl)
 
     def _trec_(self) -> (List[str], List[int], List[str], List[int]):
@@ -271,7 +287,7 @@ class DataPuller:
         trn_texts, trn_lbl = [texts[i] for i in trn_idx], [labels[i] for i in trn_idx]
         val_texts, val_lbl = [texts[i] for i in val_idx], [labels[i] for i in val_idx]
 
-        return self.__common_preprocessing_(trn_texts, trn_lbl, val_texts, val_lbl, _distribute=True)
+        return self.__common_preprocessing_(trn_texts, trn_lbl, val_texts, val_lbl, _distribute=False)
 
     def _wikitext_(self) -> (List[str], List[int], List[str], List[int]):
         """ Adds validation set to train """
