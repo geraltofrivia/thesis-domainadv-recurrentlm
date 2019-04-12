@@ -29,14 +29,14 @@ from mytorch.utils.goodies import *
 
 # Paths & other macros
 re1 = re.compile(r'  +')
-KNOWN_SOURCES = ['yelp', 'imdb', 'wikitext', 'trec']
+KNOWN_SOURCES = ['yelp', 'imdb', 'wikitext', 'trec', 'cornell']
 BOS = 'xbos'  # beginning-of-sentence tag
 FLD = 'xfld'  # data field tag
 IMDB_CLASSES = ['neg', 'pos', 'unsup']
 WIKI_CLASSES = ['wiki.train.tokens', 'wiki.valid.tokens', 'wiki.test.tokens']
 
 WIKI_DATA_PATH = Path('./raw/wikitext/wikitext-103/')
-IMDB_DATA_PATH = Path('./raw/imdb/aclImdb/')
+IMDB_DATA_PATH = Path('./rCUDA_VISIBLE_DEVICES=1 python main.py -d cornell -l 0aw/imdb/aclImdb/')
 TREC_DATA_PATH = Path('./raw/trec/')
 YELP_DATA_PATH = Path('./raw/yelp/')
 CACHED_PATH_TEMPLATE = "./resources/proc/%(src)s/cached"
