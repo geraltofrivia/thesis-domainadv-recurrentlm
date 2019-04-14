@@ -69,6 +69,8 @@ mkdir resources/proc/trec
 mkdir resources/proc/trec/cached
 mkdir resources/proc/yelp
 mkdir resources/proc/yelp/cached
+mkdir resources/proc/cornell
+mkdir resources/proc/cornell/cached
 
 
 

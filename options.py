@@ -29,7 +29,7 @@ class Phase2:
 
 class Phase3:
     lr = FancyDict(
-        init=0.003,
+        init=0.0003,
     )
     encoder_dropouts = np.asarray([0.4, 0.5, 0.05, 0.3, 0.4]) * 0.5
     bs = 10

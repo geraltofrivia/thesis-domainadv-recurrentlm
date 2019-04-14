@@ -411,7 +411,7 @@ if __name__ == "__main__":
 
     # Make lr scheduler
     org_iterations = len(data_fn(data_train))
-    freeze_mask =  np.array([0 for _ in opt.param_groups])
+    freeze_mask = np.array([0 for _ in opt.param_groups])
     freeze_mask[-1] = 1
     lr_args = {'iterations': org_iterations, 'cycles': 1}
     lr_schedule = mtlr.LearningRateScheduler(optimizer=opt, lr_args=lr_args, lr_iterator=mtlr.CosineAnnealingLR, freeze_mask=freeze_mask)
@@ -470,7 +470,7 @@ if __name__ == "__main__":
     traces_new = utils.dann_loop(**args)
     traces = [a+b for a, b in zip(traces, traces_new)]
 
-    args['epochs'] = 15
+    args['epochs'] = 6
     args['save_above_trn'] = np.max(traces[utils.TRACES_FORMAT['train_acc_main']])
     args['save_above_aux'] = np.min(traces[utils.TRACES_FORMAT['train_acc_aux']][2:])
     args['epoch_count'] += 1

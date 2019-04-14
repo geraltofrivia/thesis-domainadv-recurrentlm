@@ -36,7 +36,7 @@ IMDB_CLASSES = ['neg', 'pos', 'unsup']
 WIKI_CLASSES = ['wiki.train.tokens', 'wiki.valid.tokens', 'wiki.test.tokens']
 
 WIKI_DATA_PATH = Path('./raw/wikitext/wikitext-103/')
-IMDB_DATA_PATH = Path('./rCUDA_VISIBLE_DEVICES=1 python main.py -d cornell -l 0aw/imdb/aclImdb/')
+IMDB_DATA_PATH = Path('./raw/imdb/aclImdb/')
 TREC_DATA_PATH = Path('./raw/trec/')
 YELP_DATA_PATH = Path('./raw/yelp/')
 CACHED_PATH_TEMPLATE = "./resources/proc/%(src)s/cached"
