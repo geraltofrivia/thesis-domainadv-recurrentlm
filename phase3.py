@@ -246,20 +246,21 @@ def _eval(y_pred, y_true, **args):
 
 
 # noinspection PyUnresolvedReferences
-def mulittask_classification_loss(y_pred: list, y_true: torch.Tensor,
-                                  loss_fn: List[Union[torch.nn.Module, Callable]],
-                                  task_index: torch.Tensor = None, **args) -> torch.Tensor:
+def multitask_classification_loss(y_pred: list, y_true: torch.Tensor, loss_fn: List[Union[torch.nn.Module, Callable]],
+                                  task_index: torch.Tensor = None, ignore_dataset: list = (), **args) -> torch.Tensor:
     """
         Accepts different sized y_preds where each element can have [1, _] shapes.
         Provide one or multiple loss functions depending upon the num of tasks, using our regular -partial- thing.
 
-        Eg. lfn = partial(mulittask_classification_loss, loss_fn:torch.nn.CrossEntropyLoss())
+        Eg. lfn = partial(multitask_classification_loss, loss_fn:torch.nn.CrossEntropyLoss())
 
     :param y_pred: (list) of tensors where each tensor is of shape (1, _) of length bs
     :param y_true: (torch.Tensor) of shape (bs,)
     :param loss_fn: (torch.nn.Module or a function; or a list of those) which calculate the loss given a y_true and y_pred.
     :param task_index: (torch.Tensor, Optional) of shape (bs,) which dictates which loss to use.
                        Must be provided if there are multiple loss_fns provided
+    :param ignore_dataset: (list of ints) indicating which task_index values to ignore.
+            Eg. if task_index[0] -> 1 implies that its from 'imdb' task, and you won't wanna train on it, simply pass [1] as ignore_dataset
     :return: the loss value (torch.Tensor)
     """
 
@@ -274,7 +275,7 @@ def mulittask_classification_loss(y_pred: list, y_true: torch.Tensor,
             f"y_true of len {y_true.shape[0]}, and task_index of len {task_index.shape[0]}"
 
         losses = [loss_fn[task_index[i].item()](_y_pred.view(1, -1), y_true[i].unsqueeze(0)).view(-1)
-                  for i, _y_pred in enumerate(y_pred)]
+                  for i, _y_pred in enumerate(y_pred) if task_index[i].item() not in ignore_dataset]
 
     return torch.sum(torch.cat(losses))
 
@@ -308,6 +309,8 @@ if __name__ == "__main__":
                     help="Comma separated two dataset names like wikitext,imdb")
     ap.add_argument("-l", "--lambda", type=float, required=False,
                         help="Desired value of loss scale factor for dann module")
+    ap.add_argument("-z", "--zeroshot", type=str, required=True,
+                    help="Datasets on which we ought to ignore shit")
 
     args = vars(ap.parse_args())
 
@@ -321,6 +324,12 @@ if __name__ == "__main__":
     MESSAGE = args['message']
     DATASETS = args['datasets'].split(',')
     LOSS_SCALE = args['lambda']
+    ZERO = args['zeroshot']
+
+    assert set(DATASETS).issuperset(
+        set(ZERO)), f'At least one of the dataset which you instructed to ignore: {ZERO} is not being considered: {DATASETS}'
+
+    ZERO = [DATASETS.index(d) for d in ZERO]
 
     if MODEL_DIR is None:
         UNSUP_MODEL_DIR = DUMPPATH / '_'.join(DATASETS) / str(MODEL_NUM)
@@ -393,7 +402,7 @@ if __name__ == "__main__":
     bs = params.bs
     loss_fns = [torch.nn.CrossEntropyLoss(weight=torch.tensor(w, device=device, dtype=torch.float))
                 for w in task_specific_weights]
-    loss_main_fn = partial(mulittask_classification_loss, loss_fn=loss_fns)
+    loss_main_fn = partial(multitask_classification_loss, loss_fn=loss_fns, ignore_datasets=ZERO)
     if len(DATASETS) > 1:
         loss_aux_fn = partial(domain_classifier_loss, loss_fn=torch.nn.CrossEntropyLoss(
             torch.tensor(dataset_specific_weights, device=device, dtype=torch.float)))
