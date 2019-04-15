@@ -152,8 +152,14 @@ class TextClassifier(nn.Module):
 
         return torch.nn.ModuleList(layers)
 
-    def forward(self, x: torch.tensor, domain: torch.tensor):
-        """ x is bs, sl; dom is bs indicating the task. """
+    def forward(self, x: torch.tensor, domain: torch.tensor, task_index: dict = None):
+        """ x is bs, sl; dom is bs indicating the task.
+                task index can reroute tasks of a domain to another.
+                Eg. if task_index = {1:0}, all those tasks which are of domain[i] = 1, will not be done with linear[1] but with linear[0]
+        """
+
+        if task_index is None:
+            task_index = {}
 
         # Encoding all the data
         x_proc = self.encoder(x.transpose(1, 0))
@@ -175,7 +181,7 @@ class TextClassifier(nn.Module):
             """
             x_proc_pos = ([layer_op[:, pos].view(sl, 1, -1) for layer_op in x_proc[0]],
                          [layer_op[:, pos].view(sl, 1, -1) for layer_op in x_proc[1]])
-            score.append(self.linear[dom.item()](x_proc_pos)[0])
+            score.append(self.linear[dom.item() if dom.item() not in task_index else task_index[dom.item()]](x_proc_pos)[0])
 
         return score, x_proc
 
@@ -186,10 +192,10 @@ class TextClassifier(nn.Module):
         x_proc[1] = [GradReverse.apply(enc_tensr) for enc_tensr in x_proc[1]]
         return self.domain_clf(x_proc)[0]
 
-    def predict(self, x, d):
+    def predict(self, x, d, task_index: None):
         with torch.no_grad():
             self.eval()
-            predicted = self.forward(x, d)
+            predicted = self.forward(x, d, task_index)
             self.train()
             return predicted
 
@@ -247,7 +253,7 @@ def _eval(y_pred, y_true, **args):
 
 # noinspection PyUnresolvedReferences
 def multitask_classification_loss(y_pred: list, y_true: torch.Tensor, loss_fn: List[Union[torch.nn.Module, Callable]],
-                                  task_index: torch.Tensor = None, ignore_dataset: list = (), **args) -> torch.Tensor:
+                                  task_index: torch.Tensor = None, ignore_dataset: list = [], **args) -> torch.Tensor:
     """
         Accepts different sized y_preds where each element can have [1, _] shapes.
         Provide one or multiple loss functions depending upon the num of tasks, using our regular -partial- thing.
@@ -266,8 +272,8 @@ def multitask_classification_loss(y_pred: list, y_true: torch.Tensor, loss_fn: L
 
     # Case 1, only one task -> len(loss_fn) == 1. Ignore task index, in this case
     if len(loss_fn) == 1:
-        losses = [loss_fn[0](_y_pred.view(1, -1), y_true[i].unsqueeze(0)).view(-1)
-                  for i, _y_pred in enumerate(y_pred)]
+        losses = torch.cat([loss_fn[0](_y_pred.view(1, -1), y_true[i].unsqueeze(0)).view(-1)
+                            for i, _y_pred in enumerate(y_pred)])
 
     else:
         # Case 2: multiple loss functions. In that case, choose the loss fn based on task index
@@ -277,7 +283,13 @@ def multitask_classification_loss(y_pred: list, y_true: torch.Tensor, loss_fn: L
         losses = [loss_fn[task_index[i].item()](_y_pred.view(1, -1), y_true[i].unsqueeze(0)).view(-1)
                   for i, _y_pred in enumerate(y_pred) if task_index[i].item() not in ignore_dataset]
 
-    return torch.sum(torch.cat(losses))
+        if len(losses) == 0:
+            # Edge case: all the entries are to be ignored
+            losses = torch.tensor(0, device=task_index.device, dtype=torch.float)
+        else:
+            losses = torch.cat(losses)
+
+    return torch.sum(losses)
 
 
 def domain_classifier_loss(y_pred: list, y_true: torch.Tensor, loss_fn: List[Union[torch.nn.Module, Callable]], **args):
@@ -330,6 +342,12 @@ if __name__ == "__main__":
         set(ZERO)), f'At least one of the dataset which you instructed to ignore: {ZERO} is not being considered: {DATASETS}'
 
     ZERO = [DATASETS.index(d) for d in ZERO]
+    if ZERO == 0:
+        # If the task which we want to leave untrained in task 0,
+        alter_task = 1
+    else:
+        alter_task = 0
+    ZERO_TASK_INDEX = {ZERO: alter_task}
 
     if MODEL_DIR is None:
         UNSUP_MODEL_DIR = DUMPPATH / '_'.join(DATASETS) / str(MODEL_NUM)
@@ -402,7 +420,7 @@ if __name__ == "__main__":
     bs = params.bs
     loss_fns = [torch.nn.CrossEntropyLoss(weight=torch.tensor(w, device=device, dtype=torch.float))
                 for w in task_specific_weights]
-    loss_main_fn = partial(multitask_classification_loss, loss_fn=loss_fns, ignore_datasets=ZERO)
+    loss_main_fn = partial(multitask_classification_loss, loss_fn=loss_fns, ignore_dataset=ZERO)
     if len(DATASETS) > 1:
         loss_aux_fn = partial(domain_classifier_loss, loss_fn=torch.nn.CrossEntropyLoss(
             torch.tensor(dataset_specific_weights, device=device, dtype=torch.float)))
@@ -436,7 +454,7 @@ if __name__ == "__main__":
 
     args = {'epochs': 1, 'epoch_count': 0, 'data': data, 'device': device, 'opt': opt,
             'loss_main_fn': loss_main_fn, 'loss_aux_fn': loss_aux_fn, 'model': clf,
-            'train_fn': clf, 'predict_fn': clf.predict, 'train_aux_fn': clf.domain,
+            'train_fn': clf, 'predict_fn': partial(clf.predict, task_index=ZERO_TASK_INDEX), 'train_aux_fn': clf.domain,
             'epoch_end_hook': partial(epoch_end_hook, lr_schedule=lr_schedule),
             'weight_decay': params.weight_decay, 'clip_grads_at': params.clip_grads_at, 'lr_schedule': lr_schedule,
             'loss_aux_scale': params.loss_scale if len(DATASETS) > 1 else 0, 'tasks': len(DATASETS),
