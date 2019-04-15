@@ -347,7 +347,7 @@ if __name__ == "__main__":
         alter_task = 1
     else:
         alter_task = 0
-    ZERO_TASK_INDEX = {ZERO: alter_task}
+    ZERO_TASK_INDEX = {ZERO[0]: alter_task}
 
     if MODEL_DIR is None:
         UNSUP_MODEL_DIR = DUMPPATH / '_'.join(DATASETS) / str(MODEL_NUM)
