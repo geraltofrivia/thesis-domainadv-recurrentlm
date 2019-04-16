@@ -46,7 +46,7 @@ LM_PATH = Path('resources/models')
 LM_PATH.mkdir(exist_ok=True)
 PRE_PATH = LM_PATH / 'wt103'
 PRE_LM_PATH = PRE_PATH / 'fwd_wt103.h5'
-KNOWN_DATASETS = {'imdb': 2, 'trec': 6, 'cornell': 2}
+KNOWN_DATASETS = {'imdb': 2, 'trec': 6, 'cornell': 2, 'wikitext': 1}
 
 
 '''
@@ -321,7 +321,7 @@ if __name__ == "__main__":
                     help="Comma separated two dataset names like wikitext,imdb")
     ap.add_argument("-l", "--lambda", type=float, required=False,
                         help="Desired value of loss scale factor for dann module")
-    ap.add_argument("-z", "--zeroshot", type=str, required=True,
+    ap.add_argument("-z", "--zeroshot", type=str, required=False,
                     help="Datasets on which we ought to ignore shit")
 
     args = vars(ap.parse_args())
@@ -336,18 +336,24 @@ if __name__ == "__main__":
     MESSAGE = args['message']
     DATASETS = args['datasets'].split(',')
     LOSS_SCALE = args['lambda']
-    ZERO = args['zeroshot']
+    ZERO = args['zeroshot'].split(',') if args['zeroshot'] is not None else None
 
-    assert set(DATASETS).issuperset(
-        set(ZERO)), f'At least one of the dataset which you instructed to ignore: {ZERO} is not being considered: {DATASETS}'
+    if ZERO is not None:
 
-    ZERO = [DATASETS.index(d) for d in ZERO]
-    if ZERO == 0:
-        # If the task which we want to leave untrained in task 0,
-        alter_task = 1
+        assert set(DATASETS).issuperset(
+            set(ZERO)), f'At least one of the dataset which you instructed to ignore: {ZERO} is not being considered: {DATASETS}'
+
+        ZERO = [DATASETS.index(d) for d in ZERO]
+        if ZERO == 0:
+            # If the task which we want to leave untrained in task 0,
+            alter_task = 1
+        else:
+            alter_task = 0
+
+        ZERO_TASK_INDEX = {ZERO[0]: alter_task}
+
     else:
-        alter_task = 0
-    ZERO_TASK_INDEX = {ZERO[0]: alter_task}
+        ZERO_TASK_INDEX = None
 
     if MODEL_DIR is None:
         UNSUP_MODEL_DIR = DUMPPATH / '_'.join(DATASETS) / str(MODEL_NUM)
@@ -382,6 +388,16 @@ if __name__ == "__main__":
         if dataset == 'imdb':
             trn_texts_ = trn_texts_[trn_labels_ < 2]
             trn_labels_ = trn_labels_[trn_labels_ < 2]
+
+        # If dataset is the one to be ignored:
+        if ZERO and dataset == DATASETS[ZERO[0]]:
+
+            # Crop substantial part of the data away
+            trn_texts_ = trn_texts_[: min(len(trn_texts_), 2000)]
+            trn_labels_ = trn_labels_[: min(len(trn_texts_), 2000)]
+
+            val_texts_ = val_texts_[: min(len(trn_texts_), 2000)]
+            val_labels_ = val_labels_[: min(len(trn_texts_), 2000)]
 
         # Compute weights for cross entropy loss
         class_weights_ = class_weight.compute_class_weight('balanced', classes=range(KNOWN_DATASETS[dataset]), y=trn_labels_)
@@ -420,7 +436,7 @@ if __name__ == "__main__":
     bs = params.bs
     loss_fns = [torch.nn.CrossEntropyLoss(weight=torch.tensor(w, device=device, dtype=torch.float))
                 for w in task_specific_weights]
-    loss_main_fn = partial(multitask_classification_loss, loss_fn=loss_fns, ignore_dataset=ZERO)
+    loss_main_fn = partial(multitask_classification_loss, loss_fn=loss_fns, ignore_dataset=ZERO if ZERO is not None else [])
     if len(DATASETS) > 1:
         loss_aux_fn = partial(domain_classifier_loss, loss_fn=torch.nn.CrossEntropyLoss(
             torch.tensor(dataset_specific_weights, device=device, dtype=torch.float)))

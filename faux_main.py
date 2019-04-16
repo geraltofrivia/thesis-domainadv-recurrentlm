@@ -392,6 +392,7 @@ if __name__ == '__main__':
 
     if not SAFE_MODE:
         # Dump the model and vocab as it is!
+        print(save_dir)
         mt_save(save_dir, message=MESSAGE,
                 torch_stuff=[tosave('unsup_model_final.torch', lm.state_dict()),
                              tosave('unsup_model_enc_final.torch', lm.encoder.state_dict())],
