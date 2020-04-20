@@ -6,3 +6,6 @@ The code base is designed primarily for sentence/sequence classification tasks.
 
 ## Setup
 Run `setup.sh` after giving it executable permissions like so: `chmod +x setup.sh`.
+
+## Results
+This repository was used to conduct experiments for my Masters' thesis which can be now found [here](https://priyansh.page/files/thesis.pdf)
